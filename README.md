@@ -7,11 +7,19 @@ IBM ILOG CPLEX Concert.
 
 - Visual Studio 2026 com a carga **Desenvolvimento para Desktop com C++**;
 - IBM ILOG CPLEX Optimization Studio 22.2.0 x64.
+- Python 3.9 ou superior, somente para executar os benchmarks e gerar o HTML.
 
 O projeto procura o CPLEX pela variavel `CPLEX_STUDIO_DIR222`. Quando ela nao
 estiver definida, usa por padrao:
 
 `C:\Program Files\IBM\ILOG\CPLEX_Studio_Community222`
+
+Em uma maquina com a versao completa instalada em outro diretorio, defina a
+variavel antes de compilar. Por exemplo:
+
+```powershell
+$env:CPLEX_STUDIO_DIR222 = "C:\Program Files\IBM\ILOG\CPLEX_Studio222"
+```
 
 ## Compilar no Visual Studio
 
@@ -22,7 +30,74 @@ estiver definida, usa por padrao:
 O executavel sera criado em `bin\x64\Release\vne_branch_price.exe`. A DLL do
 CPLEX e copiada automaticamente para a mesma pasta.
 
+## Compilar pelo terminal
+
+Execute os comandos a partir da raiz do repositorio.
+
+### Developer PowerShell do Visual Studio
+
+Abra **Developer PowerShell for Visual Studio** pelo menu Iniciar. Nesse
+terminal, o `msbuild` ja fica disponivel no `PATH`:
+
+```powershell
+msbuild .\VNE_BranchPrice.sln `
+  /t:Build `
+  /p:Configuration=Release `
+  /p:Platform=x64 `
+  /m
+```
+
+Para limpar e recompilar completamente, substitua `/t:Build` por `/t:Rebuild`.
+
+### PowerShell comum
+
+Em um PowerShell comum, `msbuild` pode nao estar no `PATH`. O trecho abaixo usa
+o `vswhere`, instalado junto com o Visual Studio, para localizar o executavel:
+
+```powershell
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vsPath = & $vswhere `
+  -latest `
+  -products * `
+  -requires Microsoft.Component.MSBuild `
+  -property installationPath
+
+if (-not $vsPath) {
+  throw "Visual Studio com MSBuild nao encontrado. Instale a carga Desktop com C++."
+}
+
+$msbuild = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
+& $msbuild .\VNE_BranchPrice.sln `
+  /t:Build `
+  /p:Configuration=Release `
+  /p:Platform=x64 `
+  /m
+```
+
+Ao final, confirme a presenca dos dois arquivos:
+
+```powershell
+Get-Item `
+  .\bin\x64\Release\vne_branch_price.exe, `
+  .\bin\x64\Release\cplex2220.dll
+```
+
 ## Executar
+
+Execute a partir da raiz do repositorio. A forma geral do comando e:
+
+```text
+vne_branch_price.exe <ilp|bp|bcp> <substrato> <pasta_requisicoes> <quantidade> [saida] [opcoes]
+```
+
+- `ilp`: formulacao inteira compacta;
+- `bp`: Branch-and-Price;
+- `bcp`: Branch-Cut-and-Price com os cortes implementados;
+- `quantidade`: usa `req0.txt` ate `reqN-1.txt` da pasta informada;
+- `saida`: arquivo texto opcional. Os padroes sao `saida-ilp.txt` para ILP e
+  `saida.txt` para BP/BCP.
+
+### Branch-and-Price
 
 ```powershell
 .\bin\x64\Release\vne_branch_price.exe `
@@ -40,7 +115,9 @@ Para executar o modelo ILP:
   ilp `
   instances\sub-20.txt `
   instances\r-250-0-50-20-10-5-25 `
-  1
+  1 `
+  saida-ilp.txt `
+  --time-limit 120
 ```
 
 Para executar Branch-Cut-and-Price com cover cuts de CPU, banda e aceitacao:
@@ -58,7 +135,7 @@ O primeiro argumento seleciona o metodo de resolucao: `bp` para
 Branch-and-Price, `bcp` para Branch-Cut-and-Price com cover cuts de CPU, banda
 e aceitacao `y`, ou `ilp` para a formulacao inteira. Os demais argumentos sao o
 arquivo do substrato, a pasta das requisicoes, a quantidade de requisicoes e,
-por fim, o arquivo de saida opcional.
+por fim, o arquivo de saida opcional e as opcoes nomeadas.
 
 ### Limites e diagnostico
 
@@ -88,6 +165,28 @@ desempate deterministico.
 Cada arquivo de saida registra iteracoes de GC, colunas novas e duplicadas e o
 motivo de parada. O bloco entre `BEGIN_SUMMARY` e `END_SUMMARY` e estavel e
 pode ser consumido por ferramentas externas.
+
+### Problemas comuns no Windows
+
+Se o PowerShell informar que `msbuild` nao foi reconhecido, use o Developer
+PowerShell ou o comando com `vswhere` mostrado acima. A simples instalacao do
+Visual Studio nao adiciona necessariamente o MSBuild ao `PATH` global.
+
+Se o Windows tiver marcado os binarios como originados de outro computador,
+desbloqueie somente os dois arquivos necessarios:
+
+```powershell
+Unblock-File -LiteralPath .\bin\x64\Release\vne_branch_price.exe
+Unblock-File -LiteralPath .\bin\x64\Release\cplex2220.dll
+```
+
+Se o Controlo de Aplicacoes Inteligentes ou uma politica corporativa continuar
+bloqueando a execucao, prefira compilar o codigo-fonte diretamente na maquina
+de destino ou solicitar a liberacao ao administrador. Nao e necessario
+desativar globalmente as protecoes do Windows.
+
+Se aparecer erro de DLL ausente, confirme que `cplex2220.dll` esta ao lado do
+executavel e que a instalacao do CPLEX e x64.
 
 ## Benchmark automatizado
 
