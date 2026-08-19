@@ -6,6 +6,7 @@
 #include <fstream>
 
 #include "Request.h"
+#include "SolverConfig.h"
 
 using namespace std;
 
@@ -21,7 +22,9 @@ public:
 	ILPModel();
 
 	void setRelaxacao();
-	double Solve(Graph *substrato, std::vector<Request*> requisicoes, bool location, bool delay, bool resilience, int fo);
+	double Solve(Graph *substrato, std::vector<Request*> requisicoes,
+		bool location, bool delay, bool resilience, int fo,
+		const SolverConfig& config, const char *outputfile);
 	void SetCplexParameters();
 
 private:

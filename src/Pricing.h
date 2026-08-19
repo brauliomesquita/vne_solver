@@ -22,8 +22,12 @@ public:
 	Pricing();
 
 	void setRelaxacao();
- 	void Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, IloNumArray2 gamma, IloNumArray3 alpha, IloNumArray3 pi, IloNumArray beta, std::vector<Column> * colunas, std::vector<Column> forbidden, std::vector<Branch> branchs);
-	void SetCplexParameters();
+	void Solve(Graph *substrate, std::vector<Request*> requests, bool location,
+		bool delay, bool resilience, IloNumArray2 gamma, IloNumArray3 alpha,
+		IloNumArray3 pi, IloNumArray beta, std::vector<Column> * colunas,
+		std::vector<Column> forbidden, std::vector<Branch> branchs,
+		double timeLimitSeconds, bool *completed);
+	void SetCplexParameters(double timeLimitSeconds);
 
 private:
 	
@@ -35,4 +39,3 @@ private:
 
 
 #endif /* GC_H */
-

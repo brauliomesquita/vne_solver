@@ -1,4 +1,5 @@
 #include "ILPModel.h"
+#include "Utility.h"
 
  ILPModel::ILPModel() {
 	 relaxacao = false;
@@ -31,7 +32,10 @@
  }
 
  /* FO -- 1: padrão (banda), 2: alfa, 3: delay */
- double ILPModel::Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, int fo) {
+ double ILPModel::Solve(Graph *substrate, std::vector<Request*> requests,
+	 bool location, bool delay, bool resilience, int fo,
+	 const SolverConfig& config, const char *outputfile) {
+	const double start = get_time();
 
  	IloEnv env;
  	IloModel model(env);
@@ -61,7 +65,7 @@
  	
 	//SetCplexParameters();
 	//problem->setParam(IloCplex::Threads, 1);
- 	problem->setParam(IloCplex::TiLim, 3600.0);
+	problem->setParam(IloCplex::TiLim, config.globalTimeLimitSeconds);
 
  	x = IntVar4Matrix(env, requests.size());
  	z = IntVar3Matrix(env, requests.size());
@@ -356,8 +360,9 @@
  // 	}
 
 	// float accRatio = 0;
-  	try {
-  		problem->solve();
+	bool solved = false;
+	try {
+		solved = problem->solve();
 	} catch (IloException& e) {
 		cerr << "ERROR: " << e.getMessage() << endl;
 	} catch (...) {
@@ -459,6 +464,50 @@
  // 			delete problem;
  // 			env.end();
 
-  			return problem->getObjValue();;
+	const double elapsed = get_time() - start;
+	double objectiveValue = VNE_INFINITY;
+	double lowerBound = 0.0;
+	double gapPercent = 100.0;
+	std::string status = "not_solved";
+	if (solved) {
+		objectiveValue = problem->getObjValue();
+		lowerBound = problem->getBestObjValue();
+		gapPercent = problem->getMIPRelativeGap() * 100.0;
+		status = problem->getStatus() == IloAlgorithm::Optimal ?
+			"optimal" : "time_limit_or_feasible";
+	} else if (problem->getStatus() == IloAlgorithm::Infeasible) {
+		status = "infeasible";
+	}
+
+	std::ofstream result(outputfile, std::ofstream::out);
+	result << "ILP Result" << endl;
+	result << "Objective: " << objectiveValue << endl;
+	result << "Lower Bound: " << lowerBound << endl;
+	result << "GAP: " << gapPercent << endl;
+	result << "Time: " << elapsed << endl;
+	result << "Status: " << status << endl;
+	result << "BEGIN_SUMMARY" << endl;
+	result << "method=ilp" << endl;
+	result << "status=" << status << endl;
+	result << "requests=" << requests.size() << endl;
+	result << "time_limit_seconds=" << config.globalTimeLimitSeconds << endl;
+	result << "elapsed_seconds=" << elapsed << endl;
+	result << "objective=" << objectiveValue << endl;
+	result << "lower_bound=" << lowerBound << endl;
+	result << "gap_percent=" << gapPercent << endl;
+	result << "nodes=0" << endl;
+	result << "cg_iterations=0" << endl;
+	result << "generated_columns=0" << endl;
+	result << "duplicate_columns=0" << endl;
+	result << "root_only=0" << endl;
+	result << "heuristic_time_limit_seconds=0" << endl;
+	result << "restricted_mip_time_limit_seconds=0" << endl;
+	result << "branching=cplex" << endl;
+	result << "END_SUMMARY" << endl;
+	result.close();
+
+	delete problem;
+	env.end();
+	return objectiveValue;
 
  		}

@@ -128,6 +128,7 @@
     <ClInclude Include="src\Node.h" />
     <ClInclude Include="src\Pricing.h" />
     <ClInclude Include="src\Request.h" />
+    <ClInclude Include="src\SolverConfig.h" />
     <ClInclude Include="src\Utility.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

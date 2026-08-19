@@ -58,7 +58,73 @@ O primeiro argumento seleciona o metodo de resolucao: `bp` para
 Branch-and-Price, `bcp` para Branch-Cut-and-Price com cover cuts de CPU, banda
 e aceitacao `y`, ou `ilp` para a formulacao inteira. Os demais argumentos sao o
 arquivo do substrato, a pasta das requisicoes, a quantidade de requisicoes e,
-nos modos `bp` e `bcp`, o arquivo de saida opcional.
+por fim, o arquivo de saida opcional.
+
+### Limites e diagnostico
+
+Todos os metodos aceitam `--time-limit SEGUNDOS`. BP e BCP tambem aceitam:
+
+- `--heuristic-time-limit SEGUNDOS`: limite da heuristica primal por no;
+- `--restricted-mip-time-limit SEGUNDOS`: limite do MIP restrito;
+- `--root-only`: resolve somente a geracao de colunas do no raiz.
+
+Exemplo de diagnostico da raiz por 120 segundos:
+
+```powershell
+.\bin\x64\Release\vne_branch_price.exe `
+  bcp instances\sub-20.txt instances\r-250-0-50-20-10-5-25 5 `
+  saida-raiz.txt `
+  --time-limit 120 `
+  --heuristic-time-limit 2 `
+  --restricted-mip-time-limit 2 `
+  --root-only
+```
+
+O MIP restrito e executado apenas na raiz ou quando a heuristica primal nao
+encontra incumbente. O branching escolhe a variavel mais fracionaria da
+primeira familia disponivel (`y`, depois `z`, depois uso de aresta), com
+desempate deterministico.
+
+Cada arquivo de saida registra iteracoes de GC, colunas novas e duplicadas e o
+motivo de parada. O bloco entre `BEGIN_SUMMARY` e `END_SUMMARY` e estavel e
+pode ser consumido por ferramentas externas.
+
+## Benchmark automatizado
+
+Os scripts requerem Python 3.9 ou superior e usam apenas a biblioteca padrao.
+
+O script abaixo executa ILP, BP e BCP com 1 a 5 requisicoes e limite de 120
+segundos. Cada execucao recebe uma pasta propria contendo comando, stdout,
+stderr, resultado e metadados JSON:
+
+```powershell
+python .\scripts\run_benchmark.py
+```
+
+Uma campanha customizada pode usar outros tamanhos, repeticoes ou limites:
+
+```powershell
+python .\scripts\run_benchmark.py `
+  --request-counts 1 2 3 4 5 10 `
+  --time-limits 60 300 900 3600 `
+  --repetitions 3 `
+  --campaign-name servidor-cplex
+```
+
+Para estudar apenas o no raiz de BP e BCP, acrescente `--root-only`. ILP
+continua sendo resolvido normalmente nessa campanha. Por padrao os resultados
+ficam em `benchmark_results\<campanha>`; use `--output-root` para escolher
+outro local.
+
+O relatorio HTML autocontido e gerado a partir da pasta da campanha:
+
+```powershell
+python .\scripts\generate_report.py `
+  .\benchmark_results\servidor-cplex
+```
+
+O arquivo `report.html` compara UB, LB, gap, tempo, nos, iteracoes de GC e
+colunas, alem de preservar os resultados brutos para auditoria.
 
 ## Cover cuts de CPU e banda
 

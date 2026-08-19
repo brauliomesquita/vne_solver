@@ -7,6 +7,7 @@
 #include <malloc.h>
 #include <fstream>
 #include <cmath>
+#include <string>
 
 #include "Request.h"
 #include "Column.h"
@@ -14,6 +15,7 @@
 #include "Pricing.h"
 #include "Utility.h"
 #include "Branch.h"
+#include "SolverConfig.h"
 
 using namespace std;
 
@@ -84,13 +86,16 @@ class GC {
 	public:
 		GC();
 		GC(GC * parent);
-		void Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, bool useCuts, int *y_, Branch *branch, unsigned int *saida);
+		void Solve(Graph *substrate, std::vector<Request*> requests, bool location,
+			bool delay, bool resilience, bool useCuts, int *y_, Branch *branch,
+			unsigned int *saida, const SolverConfig& config,
+			double nodeTimeLimitSeconds);
 		void CreateVariables();
 		void CreateObjectiveFunction();
 		void CreateConstraints();
 		void addColumns(std::vector<Column> colunas);
 		void getDuals(IloNumArray2 * gamma, IloNumArray3 * alpha, IloNumArray3 * pi, IloNumArray * beta);
-		void SetCplexParameters();
+		void SetCplexParameters(double timeLimitSeconds);
 		std::vector<CpuCoverCut> findViolatedCpuCoverCuts();
 		std::vector<BandwidthCoverCut> findViolatedBandwidthCoverCuts();
 		std::vector<AcceptanceResourceCoverCut> findViolatedAcceptanceResourceCoverCuts();
@@ -105,7 +110,8 @@ class GC {
 		bool hasBandwidthCoverCut(const BandwidthCoverCut& cut) const;
 		bool hasAcceptanceResourceCoverCut(const AcceptanceResourceCoverCut& cut) const;
 		bool hasAcceptanceNoGoodCut(const AcceptanceNoGoodCut& cut) const;
-		double runPrimalHeuristic(std::vector<Column>* solution);
+		double runPrimalHeuristic(std::vector<Column>* solution,
+			double timeLimitSeconds);
 		double getGAP();
 
 		void addBranchLambda(int m, int valor);
@@ -125,6 +131,9 @@ class GC {
 		unsigned int nAcceptanceCuts, gAcceptanceCuts;
 		unsigned int nNoGoodCuts, gNoGoodCuts;
 		unsigned int nFeasibilityChecks, nFeasibilityUnknown;
+		unsigned int cgIterations, duplicateColumns;
+		bool relaxationComplete;
+		std::string cgStopReason;
 		long long nextColumnId;
 		std::vector<Column> parentPool;
 		std::vector<Column> forbidden;

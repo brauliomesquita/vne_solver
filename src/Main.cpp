@@ -111,9 +111,12 @@ bool readVNsFolder(const char * folder, int numberVNs) {
 
 int main(int argc, char *argv[])
 {
-	if (argc < 5 || argc > 6) {
+	if (argc < 5) {
 		cerr << "Uso: " << argv[0]
-			 << " <bp|bcp|ilp> <substrato.txt> <pasta_requisicoes> <quantidade> [saida.txt]" << endl;
+			 << " <bp|bcp|ilp> <substrato.txt> <pasta_requisicoes> <quantidade>"
+			 << " [saida.txt] [--time-limit segundos]"
+			 << " [--heuristic-time-limit segundos]"
+			 << " [--restricted-mip-time-limit segundos] [--root-only]" << endl;
 		return EXIT_FAILURE;
 	}
 
@@ -128,6 +131,53 @@ int main(int argc, char *argv[])
 	const long numberVNs = std::strtol(argv[4], &end, 10);
 	if (*argv[4] == '\0' || *end != '\0' || numberVNs <= 0) {
 		cerr << "A quantidade de requisicoes deve ser um inteiro positivo." << endl;
+		return EXIT_FAILURE;
+	}
+
+	SolverConfig config;
+	std::string outputfile = method == "ilp" ? "saida-ilp.txt" : "saida.txt";
+	int argument = 5;
+	if (argument < argc && std::string(argv[argument]).rfind("--", 0) != 0) {
+		outputfile = argv[argument++];
+	}
+	auto parseNonNegative = [&](const char *option, double *destination) -> bool {
+		if (argument >= argc) {
+			cerr << "Falta o valor de " << option << "." << endl;
+			return false;
+		}
+		char *valueEnd = nullptr;
+		const double value = std::strtod(argv[argument++], &valueEnd);
+		if (*valueEnd != '\0' || value < 0.0) {
+			cerr << "Valor invalido para " << option << "." << endl;
+			return false;
+		}
+		*destination = value;
+		return true;
+	};
+	while (argument < argc) {
+		const std::string option = argv[argument++];
+		if (option == "--root-only") {
+			config.rootOnly = true;
+		} else if (option == "--time-limit") {
+			if (!parseNonNegative("--time-limit", &config.globalTimeLimitSeconds))
+				return EXIT_FAILURE;
+		} else if (option == "--heuristic-time-limit") {
+			if (!parseNonNegative("--heuristic-time-limit",
+				&config.heuristicTimeLimitSeconds)) return EXIT_FAILURE;
+		} else if (option == "--restricted-mip-time-limit") {
+			if (!parseNonNegative("--restricted-mip-time-limit",
+				&config.restrictedMipTimeLimitSeconds)) return EXIT_FAILURE;
+		} else {
+			cerr << "Opcao desconhecida: " << option << endl;
+			return EXIT_FAILURE;
+		}
+	}
+	if (config.globalTimeLimitSeconds <= 0.0) {
+		cerr << "--time-limit deve ser maior que zero." << endl;
+		return EXIT_FAILURE;
+	}
+	if (method == "ilp" && config.rootOnly) {
+		cerr << "--root-only e valido apenas para bp e bcp." << endl;
 		return EXIT_FAILURE;
 	}
 
@@ -147,11 +197,12 @@ int main(int argc, char *argv[])
 	if (method == "bp" || method == "bcp") {
 		BP bp;
 		bp.Solve(substrate, requests, false, false, false,
-			method == "bcp", argc == 6 ? argv[5] : "saida.txt");
+			method == "bcp", outputfile.c_str(), config);
 	} else {
 		ILPModel ilp;
 		const double objective = ilp.Solve(
-			substrate, requests, false, false, false, 1);
+			substrate, requests, false, false, false, 1, config,
+			outputfile.c_str());
 		cout << "Valor objetivo ILP: " << objective << endl;
 	}
 

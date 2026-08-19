@@ -3,6 +3,22 @@
 
 #include <algorithm>
 
+namespace {
+bool sameColumn(Column left, Column right) {
+	if (left.v != right.v || left.kl != right.kl || left.k != right.k ||
+		left.l != right.l) {
+		return false;
+	}
+	std::vector<int> leftEdges;
+	std::vector<int> rightEdges;
+	for (const Edge& edge : left.getEdges()) leftEdges.push_back(edge.getId());
+	for (const Edge& edge : right.getEdges()) rightEdges.push_back(edge.getId());
+	std::sort(leftEdges.begin(), leftEdges.end());
+	std::sort(rightEdges.begin(), rightEdges.end());
+	return leftEdges == rightEdges;
+}
+}
+
 GC::GC(){
 	id = 1;
 	parentLB = 0.0;
@@ -20,6 +36,9 @@ GC::GC(){
 	nAcceptanceCuts = gAcceptanceCuts = 0;
 	nNoGoodCuts = gNoGoodCuts = 0;
 	nFeasibilityChecks = nFeasibilityUnknown = 0;
+	cgIterations = duplicateColumns = 0;
+	relaxationComplete = false;
+	cgStopReason = "not_started";
 	nextColumnId = 0;
 
 	pool = std::vector<Column>();
@@ -54,6 +73,9 @@ GC::GC(GC * parent){
 	nNoGoodCuts = static_cast<unsigned int>(parent->acceptanceNoGoodCuts.size());
 	gCpuCuts = gBandwidthCuts = gAcceptanceCuts = gNoGoodCuts = 0;
 	nFeasibilityChecks = nFeasibilityUnknown = 0;
+	cgIterations = duplicateColumns = 0;
+	relaxationComplete = false;
+	cgStopReason = "not_started";
 	nextColumnId = parent->nextColumnId;
 	this->pool = std::vector<Column>();
 	this->parentPool = std::vector<Column>(parent->pool);
@@ -119,8 +141,8 @@ void GC::addBranch(Branch branch, int valor){
 
 }
 
-void GC::SetCplexParameters() {
-	master->setParam(IloCplex::TiLim, 3600.0);
+void GC::SetCplexParameters(double timeLimitSeconds) {
+	master->setParam(IloCplex::TiLim, timeLimitSeconds);
 
 	/*master->setParam(IloCplex::PreInd, 0);
 	master->setParam(IloCplex::AggInd, 0);
@@ -1063,13 +1085,16 @@ unsigned int GC::separateCoverCuts() {
 }
 
 
-double GC::runPrimalHeuristic(std::vector<Column>* solution) {
+double GC::runPrimalHeuristic(std::vector<Column>* solution,
+	double timeLimitSeconds) {
 	constexpr long long oracleVariableBudget = 850;
-	constexpr double totalTimeLimit = 2.0;
 	constexpr double minimumRemainingTime = 0.05;
 
 	if (solution != nullptr) {
 		solution->clear();
+	}
+	if (timeLimitSeconds < minimumRemainingTime) {
+		return VNE_INFINITY;
 	}
 
 	// A forced physical edge can require a route-specific construction. The
@@ -1135,7 +1160,7 @@ double GC::runPrimalHeuristic(std::vector<Column>* solution) {
 
 	const double start = get_time();
 	while (true) {
-		const double remaining = totalTimeLimit - (get_time() - start);
+		const double remaining = timeLimitSeconds - (get_time() - start);
 		if (remaining < minimumRemainingTime) {
 			return VNE_INFINITY;
 		}
@@ -1182,7 +1207,14 @@ double GC::getGAP(){
 	return 100*(1 - lb/ub);
 }
 
-void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, bool useCuts, int *y_, Branch *branch, unsigned int *saida){
+void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
+	bool delay, bool resilience, bool useCuts, int *y_, Branch *branch,
+	unsigned int *saida, const SolverConfig& config,
+	double nodeTimeLimitSeconds){
+	const double nodeStart = get_time();
+	auto remainingNodeTime = [&]() {
+		return nodeTimeLimitSeconds - (get_time() - nodeStart);
+	};
 
 	this->substrate = substrate;
 	this->requests = requests;
@@ -1222,7 +1254,7 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	CreateObjectiveFunction();
 	CreateConstraints();
 
-	SetCplexParameters();
+	SetCplexParameters(std::max(0.01, nodeTimeLimitSeconds));
 
 	Pricing * p = new Pricing();
 	tempoSub = tempoMaster = tempoCuts = tempoHeuristica = 0.0;
@@ -1234,6 +1266,10 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	gCuts = 0;
 	gCpuCuts = gBandwidthCuts = gAcceptanceCuts = gNoGoodCuts = 0;
 	nFeasibilityChecks = nFeasibilityUnknown = 0;
+	cgIterations = duplicateColumns = 0;
+	relaxationComplete = false;
+	cgStopReason = "running";
+	sol_inteira = true;
 	primalHeuristicUb = VNE_INFINITY;
 	primalHeuristicAccepted = 0;
 	double init, end;
@@ -1287,16 +1323,37 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 
 
 	while(true){
-		init = get_time();
-		if(!master->solve()){
-			this->lb = VNE_INFINITY;
+		const double masterRemaining = remainingNodeTime();
+		if (masterRemaining <= 0.01) {
+			this->lb = parentLB;
+			cgStopReason = "global_time_limit";
+			*saida = 0;
+			gCols = nCols - gCols;
+			tempoRelaxacao = tempoMaster + tempoSub + tempoCuts;
 			delete p;
 			delete master;
 			env.end();
+			tempoTotal = get_time() - nodeStart;
+			return;
+		}
+		master->setParam(IloCplex::TiLim, masterRemaining);
+		init = get_time();
+		if(!master->solve()){
+			this->lb = parentLB;
+			cgStopReason = remainingNodeTime() <= 0.01 ?
+				"global_time_limit" : "master_not_solved";
+			*saida = 0;
+			gCols = nCols - gCols;
+			tempoRelaxacao = tempoMaster + tempoSub + tempoCuts;
+			delete p;
+			delete master;
+			env.end();
+			tempoTotal = get_time() - nodeStart;
 			return;
 		}
 		end =  get_time();
 		tempoMaster += end - init;
+		cgIterations++;
 
 		if (useCuts) {
 			init = get_time();
@@ -1316,17 +1373,94 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 
 		getDuals(&gamma, &alpha, &pi, &beta);
 
+		bool pricingCompleted = true;
 		init = get_time();
-		p->Solve(substrate, requests, location, delay, resilience, gamma, alpha, pi, beta, &colunas, forbidden, branchs);
+		p->Solve(substrate, requests, location, delay, resilience, gamma, alpha,
+			pi, beta, &colunas, forbidden, branchs,
+			std::max(0.0, remainingNodeTime()), &pricingCompleted);
 		end =  get_time();
 		tempoSub += end - init;
 
-			// Resolver Pricing
-		if(colunas.size() == 0)
-			break;
-
-		addColumns(colunas);
+		std::vector<Column> uniqueColumns;
+		auto collectUniqueColumns = [&]() {
+			for (const Column& candidate : colunas) {
+				bool duplicate = false;
+				for (const Column& existing : pool) {
+					if (sameColumn(candidate, existing)) {
+						duplicate = true;
+						break;
+					}
+				}
+				if (!duplicate) {
+					for (const Column& pending : uniqueColumns) {
+						if (sameColumn(candidate, pending)) {
+							duplicate = true;
+							break;
+						}
+					}
+				}
+				if (duplicate) duplicateColumns++;
+				else uniqueColumns.push_back(candidate);
+			}
+		};
+		const bool pricingReturnedColumns = !colunas.empty();
+		collectUniqueColumns();
 		colunas.clear();
+
+		if (!pricingCompleted) {
+			this->lb = parentLB;
+			cgStopReason = "pricing_time_limit";
+			*saida = 0;
+			gCols = nCols - gCols;
+			tempoRelaxacao = tempoMaster + tempoSub + tempoCuts;
+			delete p;
+			delete master;
+			env.end();
+			tempoTotal = get_time() - nodeStart;
+			return;
+		}
+
+		// If numerical degeneracy returns only columns already in the master,
+		// price once more while explicitly excluding the current pool. This
+		// prevents an infinite loop without burdening every normal pricing call.
+		if (pricingReturnedColumns && uniqueColumns.empty()) {
+			std::vector<Column> retryForbidden = forbidden;
+			for (const Column& existing : pool) {
+				if (existing.k >= 0 && existing.l >= 0) {
+					retryForbidden.push_back(existing);
+				}
+			}
+			bool retryCompleted = true;
+			init = get_time();
+			p->Solve(substrate, requests, location, delay, resilience, gamma, alpha,
+				pi, beta, &colunas, retryForbidden, branchs,
+				std::max(0.0, remainingNodeTime()), &retryCompleted);
+			end = get_time();
+			tempoSub += end - init;
+			collectUniqueColumns();
+			colunas.clear();
+			if (!retryCompleted) {
+				this->lb = parentLB;
+				cgStopReason = "pricing_time_limit";
+				*saida = 0;
+				gCols = nCols - gCols;
+				tempoRelaxacao = tempoMaster + tempoSub + tempoCuts;
+				delete p;
+				delete master;
+				env.end();
+				tempoTotal = get_time() - nodeStart;
+				return;
+			}
+		}
+
+			// Resolver Pricing
+		if(uniqueColumns.empty()) {
+			cgStopReason = "no_negative_reduced_cost";
+			relaxationComplete = true;
+			break;
+		}
+
+		addColumns(uniqueColumns);
 	}
 	gCols = nCols - gCols;
 
@@ -1340,6 +1474,8 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		double value = master->getValue(lambda[m]);
 		if(value >= 0.001 && pool[m].custoFO >= 10000){
 			this->lb = VNE_INFINITY;
+			cgStopReason = "artificial_column_active";
+			tempoTotal = get_time() - nodeStart;
 			delete p;
 			delete master;
 			env.end();
@@ -1351,8 +1487,9 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	double mais_frac = 0.001;
 	for (int v = 0; v < requests.size(); v++){
 		double value = master->getValue(y[v]);
-		if(abs(value - std::round(value)) > mais_frac){
-			mais_frac = abs(value - std::round(value));
+		const double fractionality = abs(value - std::round(value));
+		if(fractionality > mais_frac){
+			mais_frac = fractionality;
 			sol_inteira = false;
 			*saida = 1;
 			*y_ = v;
@@ -1368,9 +1505,10 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 				for (int i = 0; i < substrate->getN(); i++) {
 					if (location && requests[v]->getGraph()->getDist(k, i) > requests[v]->getMaxD())
 						continue;
-					double value = master->getValue(z[v][k][i]);
-					if(abs(value - std::round(value)) > mais_frac){
-						mais_frac = abs(value - std::round(value));
+				double value = master->getValue(z[v][k][i]);
+					const double fractionality = abs(value - std::round(value));
+					if(fractionality > mais_frac){
+						mais_frac = fractionality;
 						sol_inteira = false;
 						*saida = 1;
 
@@ -1440,13 +1578,23 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 			}
 		}
 
+		for (int v = 0; v < requests.size(); ++v) {
+			for (int kl = 0; kl < requests[v]->getGraph()->getM(); ++kl) {
+				delete [] uso[v][kl];
+			}
+			delete [] uso[v];
+		}
+		delete [] uso;
+
 	}
 
 	double heuristicUb = VNE_INFINITY;
 	if (!sol_inteira) {
 		std::vector<Column> heuristicSolution;
 		init = get_time();
-		heuristicUb = runPrimalHeuristic(&heuristicSolution);
+		heuristicUb = runPrimalHeuristic(&heuristicSolution,
+			std::min(config.heuristicTimeLimitSeconds,
+				std::max(0.0, remainingNodeTime())));
 		end = get_time();
 		tempoHeuristica += end - init;
 		tempoTotal += end - init;
@@ -1476,7 +1624,9 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	 	model.add(IloConversion(env, lambda, ILOBOOL));
 	 	model.add(IloConversion(env, y, ILOBOOL));
 
-	 	master->setParam(IloCplex::TiLim, 30.0);
+		const bool heuristicFound = heuristicUb < VNE_INFINITY / 2.0;
+		const bool runRestrictedMip = config.restrictedMipTimeLimitSeconds > 0.0 &&
+			(this->id == 1 || !heuristicFound) && remainingNodeTime() > 0.01;
 	 	//master->setParam(IloCplex::IntSolLim, 1);
 
 		for(int l_=0; l_<lista.size(); l_++){
@@ -1485,14 +1635,18 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		}
 
 		double restrictedMasterUb = VNE_INFINITY;
-	 	try{
-		init = get_time();
-		if(master->solve())
-			restrictedMasterUb = master->getObjValue();
-		end = get_time();
-		tempoTotal += end - init;
-		} catch (IloException e){
-			cout << " O bizil foi aqui!" << endl;
+		if (runRestrictedMip) {
+			master->setParam(IloCplex::TiLim,
+				std::min(config.restrictedMipTimeLimitSeconds,
+					remainingNodeTime()));
+			try{
+				init = get_time();
+				if(master->solve())
+					restrictedMasterUb = master->getObjValue();
+				end = get_time();
+			} catch (IloException& e){
+				cerr << "Falha no MIP restrito: " << e.getMessage() << endl;
+			}
 		}
 		this->ub = std::min(heuristicUb, restrictedMasterUb);
 	}
@@ -1500,5 +1654,6 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	delete p;
 	delete master;
 	env.end();
+	tempoTotal = get_time() - nodeStart;
 	return;
 }

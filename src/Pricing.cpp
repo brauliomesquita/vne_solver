@@ -1,13 +1,14 @@
 #include "Pricing.h"
+#include "Utility.h"
 
 Pricing::Pricing()
 {
 }
 
-void Pricing::SetCplexParameters()
+void Pricing::SetCplexParameters(double timeLimitSeconds)
 {
 	/* Limite de tempo */
-	problem->setParam(IloCplex::TiLim, 3600.0);
+	problem->setParam(IloCplex::TiLim, timeLimitSeconds);
 
 	problem->setParam(IloCplex::PreInd, 0);
 	problem->setParam(IloCplex::AggInd, 0);
@@ -28,11 +29,21 @@ void Pricing::SetCplexParameters()
 
 }
 
-void Pricing::Solve(Graph* substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, IloNumArray2 gamma, IloNumArray3 alpha, IloNumArray3 pi, IloNumArray beta, std::vector<Column>* colunas, std::vector<Column> forbidden, std::vector<Branch> branchs)
+void Pricing::Solve(Graph* substrate, std::vector<Request*> requests,
+	bool location, bool delay, bool resilience, IloNumArray2 gamma,
+	IloNumArray3 alpha, IloNumArray3 pi, IloNumArray beta,
+	std::vector<Column>* colunas, std::vector<Column> forbidden,
+	std::vector<Branch> branchs, double timeLimitSeconds, bool *completed)
 {
-# pragma omp parallel for
+	const double start = get_time();
+	*completed = true;
 	for (int v = 0; v < requests.size(); v++) {
 		for (int kl = 0; kl < requests[v]->getGraph()->getM(); kl++) {
+			const double remaining = timeLimitSeconds - (get_time() - start);
+			if (remaining <= 0.01) {
+				*completed = false;
+				return;
+			}
 
 			int k = requests[v]->getGraph()->getEdges()[kl].getOrig();
 			int l = requests[v]->getGraph()->getEdges()[kl].getDest();
@@ -41,8 +52,10 @@ void Pricing::Solve(Graph* substrate, std::vector<Request*> requests, bool locat
 			IloModel subModel(subEnv);
 			IloObjective objective(subEnv);
 			problem = new IloCplex(subEnv);
+			problem->setOut(subEnv.getNullStream());
+			problem->setWarning(subEnv.getNullStream());
 
-			SetCplexParameters();
+			SetCplexParameters(remaining);
 
 			char var_name[256];
 
@@ -238,7 +251,8 @@ void Pricing::Solve(Graph* substrate, std::vector<Request*> requests, bool locat
 
 			problem->extract(subModel);
 
-			if (problem->solve()) {
+			const bool solved = problem->solve();
+			if (solved) {
 
 				if (problem->getObjValue() <= -0.01) {
 					Column c(v, kl);
@@ -274,6 +288,14 @@ void Pricing::Solve(Graph* substrate, std::vector<Request*> requests, bool locat
 					c.custoFO = custo;
 					colunas->push_back(c);
 				}
+			}
+
+			const IloAlgorithm::Status status = problem->getStatus();
+			if (status != IloAlgorithm::Optimal && status != IloAlgorithm::Infeasible) {
+				*completed = false;
+				delete problem;
+				subEnv.end();
+				return;
 			}
 
 			delete problem;

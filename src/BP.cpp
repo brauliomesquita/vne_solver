@@ -3,7 +3,9 @@
 #include "Heuristica.h"
 
 
-void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, bool useCuts, const char * outputfile){
+void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
+	bool delay, bool resilience, bool useCuts, const char * outputfile,
+	const SolverConfig& config){
 
 	std::vector<GC*> arvore;
 	GC * raiz = new GC();
@@ -40,6 +42,14 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
     const int nameWidth = 15;
     double worstLB;
     double tempoExecucao = 0;
+	const double globalStart = get_time();
+	unsigned int processedNodes = 0;
+	unsigned int totalCgIterations = 0;
+	unsigned int totalGeneratedColumns = 0;
+	unsigned int totalDuplicateColumns = 0;
+	double rootLowerBound = 0.0;
+	double interruptedLowerBound = VNE_INFINITY;
+	std::string terminationReason = "tree_exhausted";
 
     double init, end;
 
@@ -76,6 +86,8 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
     ofs << left << setw(nameWidth) << setfill(separator) << "GAP (%)";
     ofs << left << setw(nameWidth) << setfill(separator) << "# Cols";
     ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Cols";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Dup. Cols";
+    ofs << left << setw(nameWidth) << setfill(separator) << "CG Iter";
     ofs << left << setw(nameWidth) << setfill(separator) << "# Cuts";
     ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Cuts";
     ofs << left << setw(nameWidth) << setfill(separator) << "# CPU Cuts";
@@ -94,12 +106,16 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
     ofs << left << setw(nameWidth) << setfill(separator) << "CutTime";
     ofs << left << setw(nameWidth) << setfill(separator) << "HeurTime";
     ofs << left << setw(nameWidth) << setfill(separator) << "Total Time";
+	ofs << left << setw(28) << setfill(separator) << "CG Stop";
     ofs << endl;
 
 	while(arvore.size() != 0){
 		
-		if(tempoExecucao >= 3600)
+		tempoExecucao = get_time() - globalStart;
+		if(tempoExecucao >= config.globalTimeLimitSeconds) {
+			terminationReason = "global_time_limit";
 			break;
+		}
 
 		double best_cost = VNE_INFINITY;
 		int best_index = -1;
@@ -118,9 +134,17 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		if(gc->parentLB < bestUB){
 
 			init = get_time();
-			gc->Solve(substrate, requests, location, delay, resilience, useCuts, &y, &branch, &saida);
+			const double remainingGlobal = std::max(0.0,
+				config.globalTimeLimitSeconds - (get_time() - globalStart));
+			gc->Solve(substrate, requests, location, delay, resilience, useCuts,
+				&y, &branch, &saida, config, remainingGlobal);
 			end = get_time();
-			tempoExecucao += gc->tempoTotal;
+			tempoExecucao = end - globalStart;
+			processedNodes++;
+			totalCgIterations += gc->cgIterations;
+			totalGeneratedColumns += gc->gCols;
+			totalDuplicateColumns += gc->duplicateColumns;
+			if (gc->id == 1) rootLowerBound = gc->lb;
 
 			if(gc->ub < bestUB){
 				bestUB = gc->ub;
@@ -141,7 +165,8 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 			cout << "Tempo Relaxação Raiz: " << gc->tempoTotal << endl;
 
 
-			if(gc->lb < bestUB){
+			if(gc->relaxationComplete && !config.rootOnly && saida == 1 &&
+				gc->lb < bestUB){
 				for(int i=0; i<=1; i++){
 					GC * filho = new GC(gc);
 					filho->addBranch(branch, i);
@@ -169,7 +194,9 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		    ofs << left << setw(nameWidth) << setfill(separator) << worstLB;
 		    ofs << left << setw(nameWidth) << setfill(separator) << 100*(1 - worstLB/bestUB);
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCols;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCols;
+			ofs << left << setw(nameWidth) << setfill(separator) << gc->gCols;
+			ofs << left << setw(nameWidth) << setfill(separator) << gc->duplicateColumns;
+			ofs << left << setw(nameWidth) << setfill(separator) << gc->cgIterations;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCuts;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCuts;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCpuCuts;
@@ -187,9 +214,21 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoSub;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoCuts;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoHeuristica;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoTotal;
-		    ofs << left << setw(nameWidth) << setfill(separator) << (end - init);
-		    ofs << endl;
+			ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoTotal;
+			ofs << left << setw(28) << setfill(separator) << gc->cgStopReason;
+			ofs << endl;
+
+			if (!gc->relaxationComplete) {
+				terminationReason = gc->cgStopReason;
+				interruptedLowerBound = gc->lb;
+				delete gc;
+				break;
+			}
+			if (config.rootOnly) {
+				terminationReason = "root_only";
+				delete gc;
+				break;
+			}
 		}
 
 		delete gc;
@@ -197,16 +236,48 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	}
 
 	worstLB = bestUB;
-	for(int s=0; s<arvore.size(); s++){
-		if(arvore[s]->parentLB < worstLB){
-			worstLB = arvore[s]->parentLB;
+	if (config.rootOnly) {
+		worstLB = rootLowerBound;
+	} else {
+		for(int s=0; s<arvore.size(); s++){
+			if(arvore[s]->parentLB < worstLB){
+				worstLB = arvore[s]->parentLB;
+			}
+		}
+		if (interruptedLowerBound < worstLB) {
+			worstLB = interruptedLowerBound;
 		}
 	}
+	tempoExecucao = get_time() - globalStart;
 
 	ofs << "Best Integer: " << bestUB << endl;
 	ofs << "Lower Bound: " << worstLB << endl;
 	ofs << "GAP: " << 100*(1 - worstLB/bestUB) << endl;
 	ofs << "Time: " << tempoExecucao << endl;
+	ofs << "Termination: " << terminationReason << endl;
+	ofs << "Nodes Processed: " << processedNodes << endl;
+	ofs << "CG Iterations: " << totalCgIterations << endl;
+	ofs << "Generated Columns: " << totalGeneratedColumns << endl;
+	ofs << "Duplicate Columns: " << totalDuplicateColumns << endl;
+	ofs << "BEGIN_SUMMARY" << endl;
+	ofs << "method=" << (useCuts ? "bcp" : "bp") << endl;
+	ofs << "status=" << terminationReason << endl;
+	ofs << "requests=" << requests.size() << endl;
+	ofs << "time_limit_seconds=" << config.globalTimeLimitSeconds << endl;
+	ofs << "elapsed_seconds=" << tempoExecucao << endl;
+	ofs << "objective=" << bestUB << endl;
+	ofs << "lower_bound=" << worstLB << endl;
+	ofs << "gap_percent=" << 100*(1 - worstLB/bestUB) << endl;
+	ofs << "nodes=" << processedNodes << endl;
+	ofs << "cg_iterations=" << totalCgIterations << endl;
+	ofs << "generated_columns=" << totalGeneratedColumns << endl;
+	ofs << "duplicate_columns=" << totalDuplicateColumns << endl;
+	ofs << "root_only=" << (config.rootOnly ? 1 : 0) << endl;
+	ofs << "heuristic_time_limit_seconds=" << config.heuristicTimeLimitSeconds << endl;
+	ofs << "restricted_mip_time_limit_seconds="
+		<< config.restrictedMipTimeLimitSeconds << endl;
+	ofs << "branching=most_fractional" << endl;
+	ofs << "END_SUMMARY" << endl;
 	ofs << "FINISHED!" << endl;
 
 	cout << "Best Solution: " << bestUB << endl;
