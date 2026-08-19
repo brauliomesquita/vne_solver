@@ -26,14 +26,27 @@ CPLEX e copiada automaticamente para a mesma pasta.
 
 ```powershell
 .\bin\x64\Release\vne_branch_price.exe `
+  bp `
   instances\sub-20.txt `
   instances\r-250-0-50-20-10-5-25 `
   1 `
   saida.txt
 ```
 
-Argumentos: arquivo do substrato, pasta das requisicoes, quantidade de
-requisicoes e, opcionalmente, arquivo de saida.
+Para executar o modelo ILP:
+
+```powershell
+.\bin\x64\Release\vne_branch_price.exe `
+  ilp `
+  instances\sub-20.txt `
+  instances\r-250-0-50-20-10-5-25 `
+  1
+```
+
+O primeiro argumento seleciona apenas o metodo de resolucao: `bp` para
+Branch-and-Price ou `ilp` para a formulacao inteira. Os demais argumentos sao o
+arquivo do substrato, a pasta das requisicoes, a quantidade de requisicoes e,
+no modo `bp`, o arquivo de saida opcional.
 
 O perfil de depuracao da solucao ja esta configurado com esse teste de uma
 requisicao. A Community Edition do CPLEX limita o tamanho dos modelos; testes

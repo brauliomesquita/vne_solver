@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <string>
 
 
 using namespace std;
@@ -110,23 +111,30 @@ bool readVNsFolder(const char * folder, int numberVNs) {
 
 int main(int argc, char *argv[])
 {
-	if (argc < 4 || argc > 5) {
+	if (argc < 5 || argc > 6) {
 		cerr << "Uso: " << argv[0]
-			 << " <substrato.txt> <pasta_requisicoes> <quantidade> [saida.txt]" << endl;
+			 << " <bp|ilp> <substrato.txt> <pasta_requisicoes> <quantidade> [saida_bp.txt]" << endl;
+		return EXIT_FAILURE;
+	}
+
+	const std::string method = argv[1];
+	if (method != "bp" && method != "ilp") {
+		cerr << "Metodo de resolucao invalido: '" << method
+			 << "'. Use 'bp' para Branch-and-Price ou 'ilp' para o modelo inteiro." << endl;
 		return EXIT_FAILURE;
 	}
 
 	char *end = nullptr;
-	const long numberVNs = std::strtol(argv[3], &end, 10);
-	if (*argv[3] == '\0' || *end != '\0' || numberVNs <= 0) {
+	const long numberVNs = std::strtol(argv[4], &end, 10);
+	if (*argv[4] == '\0' || *end != '\0' || numberVNs <= 0) {
 		cerr << "A quantidade de requisicoes deve ser um inteiro positivo." << endl;
 		return EXIT_FAILURE;
 	}
 
-	if (!readSubstrate(argv[1])) {
+	if (!readSubstrate(argv[2])) {
 		return EXIT_FAILURE;
 	}
-	if (!readVNsFolder(argv[2], static_cast<int>(numberVNs))) {
+	if (!readVNsFolder(argv[3], static_cast<int>(numberVNs))) {
 		delete substrate;
 		substrate = nullptr;
 		return EXIT_FAILURE;
@@ -136,13 +144,16 @@ int main(int argc, char *argv[])
 	for(int v=0; v<requests.size(); v++){
 		requests[v]->getGraph()->setDist(substrate);
 	}
-
-//	ILPModel ilp;
-//	ilp.Solve(substrate, requests, 0, 0, 0, 0);
-
-	BP bp;
-	bp.Solve(substrate, requests, true, false, false,
-		argc == 5 ? argv[4] : "saida.txt");
+	if (method == "bp") {
+		BP bp;
+		bp.Solve(substrate, requests, false, false, false,
+			argc == 6 ? argv[5] : "saida.txt");
+	} else {
+		ILPModel ilp;
+		const double objective = ilp.Solve(
+			substrate, requests, false, false, false, 1);
+		cout << "Valor objetivo ILP: " << objective << endl;
+	}
 
 	delete substrate;
 	for(int v=0; v<requests.size(); v++){
