@@ -165,7 +165,7 @@ void GC::SetCplexParameters(double timeLimitSeconds) {
 	master->setParam(IloCplex::SimDisplay, 0);
 	master->setParam(IloCplex::SiftDisplay, 0);
 
-	//master->setParam(IloCplex::Threads, 1);
+	master->setParam(IloCplex::Threads, 1);
 }
 
 

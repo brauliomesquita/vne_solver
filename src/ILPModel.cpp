@@ -504,6 +504,7 @@
 	result << "root_only=0" << endl;
 	result << "heuristic_time_limit_seconds=0" << endl;
 	result << "restricted_mip_time_limit_seconds=0" << endl;
+	result << "tree_threads=0" << endl;
 	result << "branching=cplex" << endl;
 	result << "END_SUMMARY" << endl;
 	result.close();

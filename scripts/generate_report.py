@@ -40,15 +40,19 @@ def aggregate(runs: list[dict]) -> list[dict]:
     for run in runs:
         if run.get("summary"):
             key = (run["method"], int(run["requests"]),
-                   float(run["time_limit_seconds"]), bool(run["root_only"]))
+                   float(run["time_limit_seconds"]), bool(run["root_only"]),
+                   int(run.get("summary", {}).get("tree_threads",
+                                                   run.get("tree_threads", 0))))
             groups[key].append(run)
 
     rows = []
     metrics = ("elapsed_seconds", "objective", "lower_bound", "gap_percent",
-               "nodes", "cg_iterations", "generated_columns", "duplicate_columns")
-    for (method, requests, limit, root_only), group in sorted(groups.items()):
+               "nodes", "cg_iterations", "generated_columns", "duplicate_columns",
+               "max_active_workers", "open_nodes_remaining")
+    for (method, requests, limit, root_only, tree_threads), group in sorted(groups.items()):
         row = {"method": method, "requests": requests, "time_limit_seconds": limit,
-               "root_only": root_only, "repetitions": len(group)}
+               "root_only": root_only, "tree_threads": tree_threads,
+               "repetitions": len(group)}
         for metric in metrics:
             values = [value for run in group
                       if (value := numeric(run["summary"], metric)) is not None]
@@ -95,9 +99,10 @@ def line_chart(rows: list[dict], metric: str, title: str, suffix: str = "") -> s
 
     series: dict[tuple, list[dict]] = defaultdict(list)
     for row in usable:
-        series[(row["method"], row["time_limit_seconds"], row["root_only"])].append(row)
+        series[(row["method"], row["time_limit_seconds"], row["root_only"],
+                row["tree_threads"])].append(row)
     legend = []
-    for index, ((method, limit, root_only), points) in enumerate(series.items()):
+    for index, ((method, limit, root_only, tree_threads), points) in enumerate(series.items()):
         base = COLORS.get(method, "#475569")
         opacity = max(0.45, 1.0 - index * 0.08)
         points.sort(key=lambda item: item["requests"])
@@ -112,6 +117,8 @@ def line_chart(rows: list[dict], metric: str, title: str, suffix: str = "") -> s
                           f'<title>{method.upper()} · {point["requests"]} req · '
                           f'{number(point[metric])}{suffix}</title></circle>')
         label = f'{method.upper()} · {limit:g}s' + (' · raiz' if root_only else '')
+        if tree_threads:
+            label += f' · {tree_threads} threads'
         legend.append(f'<span><i style="background:{base}"></i>{html.escape(label)}</span>')
     chunks.append(f'<text class="axis-title" x="{width/2}" y="{height-3}" '
                   f'text-anchor="middle">Número de requisições</text>')
@@ -145,6 +152,9 @@ def main() -> int:
             f"<td>{badge}</td><td>{row['requests']}</td>" +
             f"<td>{number(row['time_limit_seconds'], 0)} s</td>" +
             f"<td>{'Sim' if row['root_only'] else 'Não'}</td>" +
+            f"<td>{row['tree_threads'] or '—'}</td>" +
+            f"<td>{number(row['max_active_workers'], 1)}</td>" +
+            f"<td>{number(row['open_nodes_remaining'], 1)}</td>" +
             f"<td>{html.escape(row['status'])}</td>" +
             f"<td>{number(row['objective'])}</td><td>{number(row['lower_bound'])}</td>" +
             f"<td>{number(row['gap_percent'], 2)}%</td>" +
@@ -174,7 +184,7 @@ main{{max-width:1280px;margin:auto;padding:24px}} .cards{{display:grid;grid-temp
 h2{{margin:0 0 12px;font-size:18px}} svg{{width:100%;height:auto}} .grid{{stroke:#e2e8f0;stroke-width:1}} .axis{{fill:#64748b;font-size:11px}} .axis-title{{fill:#475569;font-size:12px}}
 .legend{{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12px}} .legend i{{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}}
 .table-wrap{{overflow:auto;margin-bottom:30px}} table{{width:100%;border-collapse:collapse;white-space:nowrap}} th,td{{padding:12px 14px;text-align:right;border-bottom:1px solid #edf2f7}}
-th{{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:11px;text-transform:uppercase}} th:first-child,td:first-child,th:nth-child(5),td:nth-child(5){{text-align:left}}
+th{{position:sticky;top:0;background:#f8fafc;color:#475569;font-size:11px;text-transform:uppercase}} th:first-child,td:first-child,th:nth-child(8),td:nth-child(8){{text-align:left}}
 .badge{{padding:4px 8px;border-radius:999px;color:white;font-weight:700;font-size:11px}} .badge.ilp{{background:#7c3aed}} .badge.bp{{background:#0284c7}} .badge.bcp{{background:#059669}}
 footer{{color:var(--muted);padding:0 0 30px}} @media(max-width:800px){{.cards{{grid-template-columns:1fr 1fr}}.charts{{grid-template-columns:1fr}}.chart:last-child{{grid-column:auto}}}}
 </style></head><body>
@@ -185,7 +195,7 @@ footer{{color:var(--muted);padding:0 0 30px}} @media(max-width:800px){{.cards{{g
 <div class="card"><span>Gap médio</span><strong>{number(statistics.mean(gaps) if gaps else None, 2)}%</strong></div>
 <div class="card"><span>Watchdogs</span><strong>{watchdogs}</strong></div>
 </section><section class="charts">{charts}</section>
-<div class="table-wrap"><table><thead><tr><th>Método</th><th>Req.</th><th>Limite</th><th>Só raiz</th><th>Status</th><th>UB</th><th>LB</th><th>Gap</th><th>Tempo</th><th>Nós</th><th>Iter. GC</th><th>Colunas</th><th>Duplicadas</th><th>Rep.</th></tr></thead>
+<div class="table-wrap"><table><thead><tr><th>Método</th><th>Req.</th><th>Limite</th><th>Só raiz</th><th>Threads</th><th>Máx. ativos</th><th>Abertos</th><th>Status</th><th>UB</th><th>LB</th><th>Gap</th><th>Tempo</th><th>Nós</th><th>Iter. GC</th><th>Colunas</th><th>Duplicadas</th><th>Rep.</th></tr></thead>
 <tbody>{''.join(table_rows)}</tbody></table></div>
 <footer>Relatório autocontido. Dados brutos, logs e comandos permanecem na pasta da campanha.</footer></main></body></html>"""
     output.parent.mkdir(parents=True, exist_ok=True)

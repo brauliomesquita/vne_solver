@@ -125,7 +125,8 @@ int main(int argc, char *argv[])
 			 << " <bp|bcp|ilp> <substrato.txt> <pasta_requisicoes> <quantidade>"
 			 << " [saida.txt] [--time-limit segundos]"
 			 << " [--heuristic-time-limit segundos]"
-			 << " [--restricted-mip-time-limit segundos] [--root-only]" << endl;
+			 << " [--restricted-mip-time-limit segundos]"
+			 << " [--tree-threads N] [--root-only]" << endl;
 		return EXIT_FAILURE;
 	}
 
@@ -163,6 +164,20 @@ int main(int argc, char *argv[])
 		*destination = value;
 		return true;
 	};
+	auto parseTreeThreads = [&]() -> bool {
+		if (argument >= argc) {
+			cerr << "Falta o valor de --tree-threads." << endl;
+			return false;
+		}
+		char *valueEnd = nullptr;
+		const unsigned long value = std::strtoul(argv[argument++], &valueEnd, 10);
+		if (*valueEnd != '\0' || value == 0 || value > 64) {
+			cerr << "--tree-threads deve estar entre 1 e 64." << endl;
+			return false;
+		}
+		config.treeThreads = static_cast<unsigned int>(value);
+		return true;
+	};
 	while (argument < argc) {
 		const std::string option = argv[argument++];
 		if (option == "--root-only") {
@@ -176,6 +191,8 @@ int main(int argc, char *argv[])
 		} else if (option == "--restricted-mip-time-limit") {
 			if (!parseNonNegative("--restricted-mip-time-limit",
 				&config.restrictedMipTimeLimitSeconds)) return EXIT_FAILURE;
+		} else if (option == "--tree-threads") {
+			if (!parseTreeThreads()) return EXIT_FAILURE;
 		} else {
 			cerr << "Opcao desconhecida: " << option << endl;
 			return EXIT_FAILURE;

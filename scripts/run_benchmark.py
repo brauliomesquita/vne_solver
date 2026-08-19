@@ -38,6 +38,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--heuristic-time-limit", type=float, default=2.0)
     parser.add_argument("--restricted-mip-time-limit", type=float, default=2.0)
+    parser.add_argument("--tree-threads", type=int, default=1,
+                        help="Number of concurrent BP/BCP tree workers")
     parser.add_argument("--root-only", action="store_true",
                         help="Run only the root node for BP and BCP")
     parser.add_argument("--output-root", type=Path,
@@ -86,9 +88,11 @@ def write_manifest(campaign: Path, metadata: dict, runs: list[dict]) -> None:
 def write_csv(campaign: Path, runs: list[dict]) -> None:
     fields = [
         "method", "requests", "time_limit_seconds", "repetition", "root_only",
+        "tree_threads",
         "return_code", "watchdog_timeout", "status", "elapsed_seconds",
         "objective", "lower_bound", "gap_percent", "nodes", "cg_iterations",
         "generated_columns", "duplicate_columns", "directory",
+        "max_active_workers", "open_nodes_remaining",
     ]
     with (campaign / "summary.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
@@ -101,6 +105,7 @@ def write_csv(campaign: Path, runs: list[dict]) -> None:
                 "time_limit_seconds": run["time_limit_seconds"],
                 "repetition": run["repetition"],
                 "root_only": run["root_only"],
+                "tree_threads": summary.get("tree_threads", run["tree_threads"]),
                 "return_code": run["return_code"],
                 "watchdog_timeout": run["watchdog_timeout"],
                 "status": summary.get("status", "missing_summary"),
@@ -112,6 +117,8 @@ def write_csv(campaign: Path, runs: list[dict]) -> None:
                 "cg_iterations": summary.get("cg_iterations", ""),
                 "generated_columns": summary.get("generated_columns", ""),
                 "duplicate_columns": summary.get("duplicate_columns", ""),
+                "max_active_workers": summary.get("max_active_workers", ""),
+                "open_nodes_remaining": summary.get("open_nodes_remaining", ""),
                 "directory": run["directory"],
             })
 
@@ -138,6 +145,8 @@ def main() -> int:
             raise SystemExit(f"Missing request file: {missing[0]}")
     if any(limit <= 0 for limit in args.time_limits):
         raise SystemExit("Time limits must be positive")
+    if args.tree_threads <= 0 or args.tree_threads > 64:
+        raise SystemExit("Tree threads must be between 1 and 64")
 
     campaign = output_root / args.campaign_name
     campaign.mkdir(parents=True, exist_ok=False)
@@ -152,6 +161,7 @@ def main() -> int:
         "repetitions": args.repetitions,
         "heuristic_time_limit": args.heuristic_time_limit,
         "restricted_mip_time_limit": args.restricted_mip_time_limit,
+        "tree_threads": args.tree_threads,
         "root_only": args.root_only,
     }
     runs: list[dict] = []
@@ -181,6 +191,8 @@ def main() -> int:
                     root_only = args.root_only and method in ("bp", "bcp")
                     if root_only:
                         command.append("--root-only")
+                    if method in ("bp", "bcp"):
+                        command.extend(("--tree-threads", str(args.tree_threads)))
                     (run_dir / "command.json").write_text(
                         json.dumps(command, indent=2, ensure_ascii=False), encoding="utf-8")
                     print(f"[{current}/{total}] {method.upper()} | requests={request_count} "
@@ -221,6 +233,7 @@ def main() -> int:
                         "time_limit_seconds": time_limit,
                         "repetition": repetition,
                         "root_only": root_only,
+                        "tree_threads": args.tree_threads if method in ("bp", "bcp") else 0,
                         "return_code": return_code,
                         "watchdog_timeout": watchdog_timeout,
                         "wall_seconds": wall_seconds,

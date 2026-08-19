@@ -143,6 +143,7 @@ Todos os metodos aceitam `--time-limit SEGUNDOS`. BP e BCP tambem aceitam:
 
 - `--heuristic-time-limit SEGUNDOS`: limite da heuristica primal por no;
 - `--restricted-mip-time-limit SEGUNDOS`: limite do MIP restrito;
+- `--tree-threads N`: numero de nos BP/BCP resolvidos simultaneamente (1 a 64);
 - `--root-only`: resolve somente a geracao de colunas do no raiz.
 
 Exemplo de diagnostico da raiz por 120 segundos:
@@ -165,6 +166,33 @@ desempate deterministico.
 Cada arquivo de saida registra iteracoes de GC, colunas novas e duplicadas e o
 motivo de parada. O bloco entre `BEGIN_SUMMARY` e `END_SUMMARY` e estavel e
 pode ser consumido por ferramentas externas.
+
+### Paralelismo na arvore
+
+Por padrao, BP e BCP usam `--tree-threads 1`, preservando a execucao
+sequencial. Para usar quatro workers:
+
+```powershell
+.\bin\x64\Release\vne_branch_price.exe `
+  bp instances\sub-20.txt instances\r-250-0-50-20-10-5-25 5 `
+  saida-bp-paralelo.txt `
+  --time-limit 120 `
+  --tree-threads 4
+```
+
+Os workers retiram nos de uma fila central ordenada pelo menor lower bound.
+Somente a thread coordenadora atualiza o incumbente, cria os filhos, calcula o
+lower bound global e escreve o log. Cada modelo CPLEX interno usa uma unica
+thread, evitando multiplicar `tree-threads` pelas threads automaticas do
+CPLEX. Com mais de um worker, as linhas da tabela aparecem na ordem em que os
+nos terminam; o campo `ID` preserva a posicao de cada no na arvore.
+As colunas `Open Nodes` e `Active` mostram, respectivamente, o tamanho atual
+do pool best-bound e quantos outros nos ainda estao sendo resolvidos.
+
+O numero ideal depende dos nucleos, memoria e licenca disponiveis. Cada worker
+mantem seu proprio `IloEnv`, mestre e subproblemas, portanto o consumo de
+memoria cresce aproximadamente com o numero de workers. `--root-only` sempre
+usa um worker.
 
 Durante BP e BCP, o console mostra somente o cabecalho e as linhas da tabela
 de exploracao da arvore. A mesma tabela continua sendo gravada no arquivo de
@@ -212,6 +240,7 @@ python .\scripts\run_benchmark.py `
   --request-counts 1 2 3 4 5 10 `
   --time-limits 60 300 900 3600 `
   --repetitions 3 `
+  --tree-threads 4 `
   --campaign-name servidor-cplex
 ```
 

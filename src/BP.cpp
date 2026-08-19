@@ -2,12 +2,100 @@
 #include "Branch.h"
 #include "Heuristica.h"
 
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <future>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <type_traits>
+
 namespace {
 constexpr char TREE_SEPARATOR = ' ';
 constexpr int TREE_COLUMN_WIDTH = 15;
 
+class WorkerPool {
+public:
+	explicit WorkerPool(unsigned int threadCount) {
+		for (unsigned int index = 0; index < threadCount; ++index) {
+			workers.emplace_back([this]() {
+				while (true) {
+					std::function<void()> task;
+					{
+						std::unique_lock<std::mutex> lock(mutex);
+						condition.wait(lock, [this]() { return stopping || !tasks.empty(); });
+						if (stopping && tasks.empty()) return;
+						task = std::move(tasks.front());
+						tasks.pop();
+					}
+					task();
+				}
+			});
+		}
+	}
+
+	~WorkerPool() {
+		{
+			std::lock_guard<std::mutex> lock(mutex);
+			stopping = true;
+		}
+		condition.notify_all();
+		for (std::thread& worker : workers) {
+			worker.join();
+		}
+	}
+
+	WorkerPool(const WorkerPool&) = delete;
+	WorkerPool& operator=(const WorkerPool&) = delete;
+
+	template <typename Function>
+	auto submit(Function&& function)
+		-> std::future<std::invoke_result_t<Function>> {
+		using Result = std::invoke_result_t<Function>;
+		auto task = std::make_shared<std::packaged_task<Result()>>(
+			std::forward<Function>(function));
+		std::future<Result> future = task->get_future();
+		{
+			std::lock_guard<std::mutex> lock(mutex);
+			tasks.emplace([task]() { (*task)(); });
+		}
+		condition.notify_one();
+		return future;
+	}
+
+private:
+	std::vector<std::thread> workers;
+	std::queue<std::function<void()>> tasks;
+	std::mutex mutex;
+	std::condition_variable condition;
+	bool stopping = false;
+};
+
+struct NodePriority {
+	bool operator()(const GC* left, const GC* right) const {
+		if (left->parentLB != right->parentLB) {
+			return left->parentLB > right->parentLB;
+		}
+		return left->id > right->id;
+	}
+};
+
+struct NodeSolveResult {
+	GC* node = nullptr;
+	Branch branch;
+	unsigned int branchRequired = 0;
+};
+
+struct RunningNode {
+	GC* node = nullptr;
+	std::future<NodeSolveResult> future;
+};
+
 void writeTreeHeader(std::ostream& output) {
 	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "ID";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Open Nodes";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Active";
 	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Node Obj";
 	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Node Int";
 	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Heur. UB";
@@ -41,10 +129,12 @@ void writeTreeHeader(std::ostream& output) {
 }
 
 void writeTreeRow(std::ostream& output, const GC& node, double bestUpperBound,
-	double globalLowerBound) {
+	double globalLowerBound, size_t openNodes, size_t activeWorkers) {
 	const double gap = bestUpperBound > 0.0 ?
 		100.0 * (1.0 - globalLowerBound / bestUpperBound) : 0.0;
 	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.id;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << openNodes;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << activeWorkers;
 	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.lb;
 	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.ub;
 	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.primalHeuristicUb;
@@ -83,11 +173,8 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	bool delay, bool resilience, bool useCuts, const char * outputfile,
 	const SolverConfig& config){
 
-	std::vector<GC*> arvore;
+	std::priority_queue<GC*, std::vector<GC*>, NodePriority> nodePool;
 	GC * raiz = new GC();
-	Branch branch;
-	int y;
-	unsigned int saida;
 	double bestUB = VNE_INFINITY;
 	
 	bool * redeAceita = new bool[requests.size()];
@@ -107,7 +194,7 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 		
 	raiz->parentPool = solucaoInicial;
 
-	arvore.push_back(raiz);
+	nodePool.push(raiz);
 
     double worstLB;
     double tempoExecucao = 0;
@@ -116,11 +203,14 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	unsigned int totalCgIterations = 0;
 	unsigned int totalGeneratedColumns = 0;
 	unsigned int totalDuplicateColumns = 0;
+	unsigned int maxActiveWorkers = 0;
 	double rootLowerBound = 0.0;
 	double interruptedLowerBound = VNE_INFINITY;
 	std::string terminationReason = "tree_exhausted";
-
-    double init, end;
+	bool stopLaunching = false;
+	const unsigned int effectiveTreeThreads = config.rootOnly ? 1U : config.treeThreads;
+	WorkerPool workerPool(effectiveTreeThreads);
+	std::vector<RunningNode> runningNodes;
 
 	std::ofstream ofs;
 	ofs.open (outputfile, std::ofstream::out);// | std::ofstream::app);
@@ -147,93 +237,136 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	writeTreeHeader(ofs);
 	writeTreeHeader(cout);
 
-	while(arvore.size() != 0){
-		
+	auto calculateGlobalLowerBound = [&]() {
+		double lowerBound = bestUB;
+		if (!nodePool.empty()) {
+			lowerBound = std::min(lowerBound, nodePool.top()->parentLB);
+		}
+		for (const RunningNode& running : runningNodes) {
+			lowerBound = std::min(lowerBound, running.node->parentLB);
+		}
+		lowerBound = std::min(lowerBound, interruptedLowerBound);
+		return lowerBound;
+	};
+
+	while (!nodePool.empty() || !runningNodes.empty()) {
 		tempoExecucao = get_time() - globalStart;
-		if(tempoExecucao >= config.globalTimeLimitSeconds) {
+		if (tempoExecucao >= config.globalTimeLimitSeconds) {
+			stopLaunching = true;
 			terminationReason = "global_time_limit";
+		}
+
+		while (!stopLaunching && runningNodes.size() < effectiveTreeThreads &&
+			!nodePool.empty()) {
+			GC* node = nodePool.top();
+			nodePool.pop();
+			if (node->parentLB >= bestUB) {
+				delete node;
+				continue;
+			}
+
+			const double remainingGlobal = std::max(0.0,
+				config.globalTimeLimitSeconds - (get_time() - globalStart));
+			if (remainingGlobal <= 0.01) {
+				nodePool.push(node);
+				stopLaunching = true;
+				terminationReason = "global_time_limit";
+				break;
+			}
+
+			auto future = workerPool.submit([node, substrate, &requests, location,
+				delay, resilience, useCuts, &config, remainingGlobal]() {
+				NodeSolveResult result;
+				result.node = node;
+				int acceptanceVariable = 0;
+				node->Solve(substrate, requests, location, delay, resilience,
+					useCuts, &acceptanceVariable, &result.branch,
+					&result.branchRequired, config, remainingGlobal);
+				return result;
+			});
+			runningNodes.push_back({node, std::move(future)});
+			maxActiveWorkers = std::max(maxActiveWorkers,
+				static_cast<unsigned int>(runningNodes.size()));
+		}
+
+		if (runningNodes.empty()) {
 			break;
 		}
 
-		double best_cost = VNE_INFINITY;
-		int best_index = -1;
-		for(int s=0; s<arvore.size(); s++){
-			if(arvore[s]->parentLB < best_cost){
-				best_cost = arvore[s]->parentLB;
-				best_index = s;
-			}
-		}
-		
-		//best_index = arvore.size() - 1;	// Depth-First Search
-		//best_index = 0;					// Breadth-First Search
-		GC * gc = arvore[best_index];
-		arvore.erase(arvore.begin() + best_index);
-
-		if(gc->parentLB < bestUB){
-
-			init = get_time();
-			const double remainingGlobal = std::max(0.0,
-				config.globalTimeLimitSeconds - (get_time() - globalStart));
-			gc->Solve(substrate, requests, location, delay, resilience, useCuts,
-				&y, &branch, &saida, config, remainingGlobal);
-			end = get_time();
-			tempoExecucao = end - globalStart;
-			processedNodes++;
-			totalCgIterations += gc->cgIterations;
-			totalGeneratedColumns += gc->gCols;
-			totalDuplicateColumns += gc->duplicateColumns;
-			if (gc->id == 1) rootLowerBound = gc->lb;
-
-			if(gc->ub < bestUB){
-				bestUB = gc->ub;
-			}
-
-			if(gc->relaxationComplete && !config.rootOnly && saida == 1 &&
-				gc->lb < bestUB){
-				for(int i=0; i<=1; i++){
-					GC * filho = new GC(gc);
-					filho->addBranch(branch, i);
-					filho->id = gc->id * 2 + i;
-					arvore.push_back(filho);
-				}
-				
-			}
-
-			worstLB = bestUB;
-			for(int s=0; s<arvore.size(); s++){
-				if(arvore[s]->parentLB < worstLB){
-					worstLB = arvore[s]->parentLB;
-				}
-			}
-
-			writeTreeRow(ofs, *gc, bestUB, worstLB);
-			writeTreeRow(cout, *gc, bestUB, worstLB);
-
-			if (!gc->relaxationComplete) {
-				terminationReason = gc->cgStopReason;
-				interruptedLowerBound = gc->lb;
-				delete gc;
-				break;
-			}
-			if (config.rootOnly) {
-				terminationReason = "root_only";
-				delete gc;
+		size_t readyIndex = runningNodes.size();
+		for (size_t index = 0; index < runningNodes.size(); ++index) {
+			if (runningNodes[index].future.wait_for(std::chrono::milliseconds(0)) ==
+				std::future_status::ready) {
+				readyIndex = index;
 				break;
 			}
 		}
+		if (readyIndex == runningNodes.size()) {
+			runningNodes.front().future.wait_for(std::chrono::milliseconds(10));
+			continue;
+		}
 
-		delete gc;
+		NodeSolveResult result;
+		GC* completedNode = runningNodes[readyIndex].node;
+		try {
+			result = runningNodes[readyIndex].future.get();
+		} catch (const std::exception& error) {
+			cerr << "Falha ao resolver no " << completedNode->id << ": "
+				<< error.what() << endl;
+			interruptedLowerBound = std::min(interruptedLowerBound,
+				completedNode->parentLB);
+			terminationReason = "worker_exception";
+			stopLaunching = true;
+			delete completedNode;
+			runningNodes.erase(runningNodes.begin() + readyIndex);
+			continue;
+		}
+		runningNodes.erase(runningNodes.begin() + readyIndex);
+		GC* node = result.node;
 
+		processedNodes++;
+		totalCgIterations += node->cgIterations;
+		totalGeneratedColumns += node->gCols;
+		totalDuplicateColumns += node->duplicateColumns;
+		if (node->id == 1) rootLowerBound = node->lb;
+		if (node->ub < bestUB) bestUB = node->ub;
+
+		if (node->relaxationComplete && !config.rootOnly &&
+			result.branchRequired == 1 && node->lb < bestUB) {
+			for (int value = 0; value <= 1; ++value) {
+				GC* child = new GC(node);
+				child->addBranch(result.branch, value);
+				child->id = node->id * 2 + value;
+				nodePool.push(child);
+			}
+		}
+
+		if (!node->relaxationComplete) {
+			interruptedLowerBound = std::min(interruptedLowerBound, node->lb);
+			if (terminationReason != "global_time_limit") {
+				terminationReason = node->cgStopReason;
+			}
+			stopLaunching = true;
+		}
+		if (config.rootOnly && node->relaxationComplete) {
+			terminationReason = "root_only";
+			stopLaunching = true;
+		}
+
+		worstLB = calculateGlobalLowerBound();
+		writeTreeRow(ofs, *node, bestUB, worstLB, nodePool.size(),
+			runningNodes.size());
+		writeTreeRow(cout, *node, bestUB, worstLB, nodePool.size(),
+			runningNodes.size());
+		delete node;
 	}
 
 	worstLB = bestUB;
 	if (config.rootOnly) {
 		worstLB = rootLowerBound;
 	} else {
-		for(int s=0; s<arvore.size(); s++){
-			if(arvore[s]->parentLB < worstLB){
-				worstLB = arvore[s]->parentLB;
-			}
+		if (!nodePool.empty()) {
+			worstLB = std::min(worstLB, nodePool.top()->parentLB);
 		}
 		if (interruptedLowerBound < worstLB) {
 			worstLB = interruptedLowerBound;
@@ -267,13 +400,17 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	ofs << "heuristic_time_limit_seconds=" << config.heuristicTimeLimitSeconds << endl;
 	ofs << "restricted_mip_time_limit_seconds="
 		<< config.restrictedMipTimeLimitSeconds << endl;
+	ofs << "tree_threads=" << effectiveTreeThreads << endl;
+	ofs << "max_active_workers=" << maxActiveWorkers << endl;
+	ofs << "open_nodes_remaining=" << nodePool.size() << endl;
 	ofs << "branching=most_fractional" << endl;
 	ofs << "END_SUMMARY" << endl;
 	ofs << "FINISHED!" << endl;
 
 	ofs.close();
 	delete [] redeAceita;
-	for (GC *pending : arvore) {
-		delete pending;
+	while (!nodePool.empty()) {
+		delete nodePool.top();
+		nodePool.pop();
 	}
 }
