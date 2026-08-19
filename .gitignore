@@ -1,0 +1,19 @@
+# Visual Studio build artifacts
+bin/
+obj/
+.vs/
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+
+# CPLEX-generated files and execution output
+cplex.log
+*.lp
+saida*.txt
+ilp_*.txt
+
+# Operating system files
+Thumbs.db
+.DS_Store
+.dropbox.attr

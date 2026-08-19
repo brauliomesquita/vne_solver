@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{47E0C714-4538-4ADB-B99A-B5A457FF73D8}</ProjectGuid>
+    <RootNamespace>VNEBranchPrice</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <CplexStudioDir Condition="'$(CPLEX_STUDIO_DIR222)'!=''">$(CPLEX_STUDIO_DIR222)</CplexStudioDir>
+    <CplexStudioDir Condition="'$(CplexStudioDir)'==''">C:\Program Files\IBM\ILOG\CPLEX_Studio_Community222</CplexStudioDir>
+    <OutDir>$(SolutionDir)bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)obj\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>vne_branch_price</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <PreprocessorDefinitions>WIN64;_CONSOLE;_CRT_SECURE_NO_WARNINGS;IL_STD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(CplexStudioDir)\cplex\include;$(CplexStudioDir)\concert\include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>cplex2220.lib;ilocplex.lib;concert.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(CplexStudioDir)\cplex\lib\x64_windows_msvc14\stat_mda;$(CplexStudioDir)\concert\lib\x64_windows_msvc14\stat_mda;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(CplexStudioDir)\cplex\bin\x64_win64\cplex2220.dll" "$(OutDir)cplex2220.dll"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;_ITERATOR_DEBUG_LEVEL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\BP.cpp" />
+    <ClCompile Include="src\Branch.cpp" />
+    <ClCompile Include="src\Column.cpp" />
+    <ClCompile Include="src\Dijkstra.cpp" />
+    <ClCompile Include="src\Edge.cpp" />
+    <ClCompile Include="src\GC.cpp" />
+    <ClCompile Include="src\Graph.cpp" />
+    <ClCompile Include="src\Heuristica.cpp" />
+    <ClCompile Include="src\ILPModel.cpp" />
+    <ClCompile Include="src\Main.cpp" />
+    <ClCompile Include="src\MappingEdge.cpp" />
+    <ClCompile Include="src\MappingLink.cpp" />
+    <ClCompile Include="src\MappingNode.cpp" />
+    <ClCompile Include="src\Node.cpp" />
+    <ClCompile Include="src\Pricing.cpp" />
+    <ClCompile Include="src\Request.cpp" />
+    <ClCompile Include="src\Utility.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\BP.h" />
+    <ClInclude Include="src\Branch.h" />
+    <ClInclude Include="src\Column.h" />
+    <ClInclude Include="src\Dijkstra.h" />
+    <ClInclude Include="src\Edge.h" />
+    <ClInclude Include="src\GC.h" />
+    <ClInclude Include="src\Graph.h" />
+    <ClInclude Include="src\Heuristica.h" />
+    <ClInclude Include="src\ILPModel.h" />
+    <ClInclude Include="src\MappingEdge.h" />
+    <ClInclude Include="src\MappingLink.h" />
+    <ClInclude Include="src\MappingNode.h" />
+    <ClInclude Include="src\Node.h" />
+    <ClInclude Include="src\Pricing.h" />
+    <ClInclude Include="src\Request.h" />
+    <ClInclude Include="src\Utility.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>
