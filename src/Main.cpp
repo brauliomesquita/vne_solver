@@ -1,3 +1,8 @@
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include "GC.h"
 #include "BP.h"
 #include "Request.h"
@@ -10,7 +15,6 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
-
 
 using namespace std;
 
@@ -111,6 +115,11 @@ bool readVNsFolder(const char * folder, int numberVNs) {
 
 int main(int argc, char *argv[])
 {
+#ifdef _WIN32
+	SetConsoleCP(CP_UTF8);
+	SetConsoleOutputCP(CP_UTF8);
+#endif
+
 	if (argc < 5) {
 		cerr << "Uso: " << argv[0]
 			 << " <bp|bcp|ilp> <substrato.txt> <pasta_requisicoes> <quantidade>"

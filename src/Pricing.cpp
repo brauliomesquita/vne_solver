@@ -246,7 +246,7 @@ void Pricing::Solve(Graph* substrate, std::vector<Request*> requests,
 				}
 			}
 			catch (...) {
-				cout << "Erro foi aqui! " << endl;
+				cerr << "Falha ao adicionar coluna proibida ao pricing." << endl;
 			}
 
 			problem->extract(subModel);

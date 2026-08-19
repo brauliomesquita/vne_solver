@@ -166,6 +166,11 @@ Cada arquivo de saida registra iteracoes de GC, colunas novas e duplicadas e o
 motivo de parada. O bloco entre `BEGIN_SUMMARY` e `END_SUMMARY` e estavel e
 pode ser consumido por ferramentas externas.
 
+Durante BP e BCP, o console mostra somente o cabecalho e as linhas da tabela
+de exploracao da arvore. A mesma tabela continua sendo gravada no arquivo de
+saida, junto com o resumo final. As mensagens internas do CPLEX ficam
+silenciadas, e o executavel configura o console do Windows para UTF-8.
+
 ### Problemas comuns no Windows
 
 Se o PowerShell informar que `msbuild` nao foi reconhecido, use o Developer

@@ -1227,6 +1227,8 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	model.setName("Master Problem - Column Generation - Path Generation");
 
 	master = new IloCplex(model);
+	master->setOut(env.getNullStream());
+	master->setWarning(env.getNullStream());
 
 	IloNumArray3 alpha, pi;
 	IloNumArray2 gamma;
@@ -1285,17 +1287,7 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	}
 
 
-	cout << "Branching decisions:" << endl;
 	for(int b=0; b<branchs.size(); b++){
-
-		if(branchs[b].tipo_branch == 3){
-			cout << "y " << branchs[b].v << " = " << branchs[b].valor << endl;
-		} else if(branchs[b].tipo_branch == 2){
-			cout << "x " << branchs[b].v << " : " << branchs[b].x << " : " << branchs[b].y << " = " << branchs[b].valor << endl;
-		} else if(branchs[b].tipo_branch == 1){
-			cout << "z " << branchs[b].v << " : " << branchs[b].x << " : " << branchs[b].y << " = " << branchs[b].valor << endl;
-		}
-
 		if(branchs[b].tipo_branch == 3){
 			y[branchs[b].v].setBounds(branchs[b].valor, branchs[b].valor);
 		} else if(branchs[b].tipo_branch == 1){

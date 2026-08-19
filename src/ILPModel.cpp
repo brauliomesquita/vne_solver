@@ -41,6 +41,8 @@
  	IloModel model(env);
  	IloObjective objective(env);
  	problem = new IloCplex(env);
+	problem->setOut(env.getNullStream());
+	problem->setWarning(env.getNullStream());
 
  	problem->out() << "Result Compact Model  " << endl;
  	problem->out() << "Substrate Size:       " << substrate->getN() << endl;

@@ -2,6 +2,82 @@
 #include "Branch.h"
 #include "Heuristica.h"
 
+namespace {
+constexpr char TREE_SEPARATOR = ' ';
+constexpr int TREE_COLUMN_WIDTH = 15;
+
+void writeTreeHeader(std::ostream& output) {
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "ID";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Node Obj";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Node Int";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Heur. UB";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Heur. Acc";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Best Integer";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Min LB";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "GAP (%)";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Cols";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Gen. Cols";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Dup. Cols";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "CG Iter";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Cuts";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Gen. Cuts";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# CPU Cuts";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# BW Cuts";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Y Cuts";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# NG Cuts";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Gen. CPU";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Gen. BW";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Gen. Y";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Gen. NG";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Feas. Checks";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "# Feas. Unk";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Relax Time";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "MasterTime";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "SubTime";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "CutTime";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "HeurTime";
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << "Total Time";
+	output << left << setw(28) << setfill(TREE_SEPARATOR) << "CG Stop" << endl;
+}
+
+void writeTreeRow(std::ostream& output, const GC& node, double bestUpperBound,
+	double globalLowerBound) {
+	const double gap = bestUpperBound > 0.0 ?
+		100.0 * (1.0 - globalLowerBound / bestUpperBound) : 0.0;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.id;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.lb;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.ub;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.primalHeuristicUb;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.primalHeuristicAccepted;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << bestUpperBound;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << globalLowerBound;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << gap;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.nCols;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.gCols;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.duplicateColumns;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.cgIterations;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.nCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.gCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.nCpuCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.nBandwidthCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.nAcceptanceCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.nNoGoodCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.gCpuCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.gBandwidthCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.gAcceptanceCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.gNoGoodCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.nFeasibilityChecks;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.nFeasibilityUnknown;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.tempoRelaxacao;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.tempoMaster;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.tempoSub;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.tempoCuts;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.tempoHeuristica;
+	output << left << setw(TREE_COLUMN_WIDTH) << setfill(TREE_SEPARATOR) << node.tempoTotal;
+	output << left << setw(28) << setfill(TREE_SEPARATOR) << node.cgStopReason << endl;
+}
+}
+
 
 void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	bool delay, bool resilience, bool useCuts, const char * outputfile,
@@ -22,24 +98,17 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	//Heuristica h;
 	//h.Construtiva(substrate, requests, location, 0, 0, &solucaoInicial);
 	bestUB = 0.0;
-	cout << "Colunas Iniciais:" << endl;
 	for(int s=0; s<solucaoInicial.size(); s++){
-		cout << solucaoInicial[s].v << "\t" << solucaoInicial[s].kl << "\t\t";
-		cout << solucaoInicial[s].custoFO << endl;
 		redeAceita[solucaoInicial[s].v] = true;
 		bestUB += solucaoInicial[s].custoFO;
 	}
 	for(int v=0; v<requests.size(); v++)
 		bestUB += 10000 * (1 -redeAceita[v]);
 		
-	cout << "Solução Inicial: " << bestUB << endl;
-	
 	raiz->parentPool = solucaoInicial;
 
 	arvore.push_back(raiz);
 
-    const char separator = ' ';
-    const int nameWidth = 15;
     double worstLB;
     double tempoExecucao = 0;
 	const double globalStart = get_time();
@@ -75,39 +144,8 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
  	ofs << endl << endl;
 
 	ofs << "Start..." << endl;
-
-	ofs << left << setw(nameWidth) << setfill(separator) << "ID";
-    ofs << left << setw(nameWidth) << setfill(separator) << "Node Obj";
-    ofs << left << setw(nameWidth) << setfill(separator) << "Node Int";
-    ofs << left << setw(nameWidth) << setfill(separator) << "Heur. UB";
-    ofs << left << setw(nameWidth) << setfill(separator) << "Heur. Acc";
-    ofs << left << setw(nameWidth) << setfill(separator) << "Best Integer";
-    ofs << left << setw(nameWidth) << setfill(separator) << "Min LB";
-    ofs << left << setw(nameWidth) << setfill(separator) << "GAP (%)";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Cols";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Cols";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Dup. Cols";
-    ofs << left << setw(nameWidth) << setfill(separator) << "CG Iter";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Cuts";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Cuts";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# CPU Cuts";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# BW Cuts";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Y Cuts";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# NG Cuts";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. CPU";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. BW";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Y";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. NG";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Feas. Checks";
-    ofs << left << setw(nameWidth) << setfill(separator) << "# Feas. Unk";
-    ofs << left << setw(nameWidth) << setfill(separator) << "Relax Time";
-    ofs << left << setw(nameWidth) << setfill(separator) << "MasterTime";
-    ofs << left << setw(nameWidth) << setfill(separator) << "SubTime";
-    ofs << left << setw(nameWidth) << setfill(separator) << "CutTime";
-    ofs << left << setw(nameWidth) << setfill(separator) << "HeurTime";
-    ofs << left << setw(nameWidth) << setfill(separator) << "Total Time";
-	ofs << left << setw(28) << setfill(separator) << "CG Stop";
-    ofs << endl;
+	writeTreeHeader(ofs);
+	writeTreeHeader(cout);
 
 	while(arvore.size() != 0){
 		
@@ -150,21 +188,6 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 				bestUB = gc->ub;
 			}
 
-			cout << "Número de colunas geradas: " << gc->pool.size() << endl;
-			cout << "Número de cover cuts: " << gc->nCuts << endl;
-			cout << "  CPU: " << gc->nCpuCuts
-				<< " | Banda: " << gc->nBandwidthCuts
-				<< " | Aceitação y: " << gc->nAcceptanceCuts
-				<< " | No-good: " << gc->nNoGoodCuts << endl;
-
-			cout << "Custo da relaxação da raiz: " << gc->lb << endl;
-			cout << "Custo da Heuristica primal na raiz: " << gc->ub << endl;
-			cout << "Tempo da heurística primal: " << gc->tempoHeuristica << endl;
-			cout << "Incumbente da heurística: " << gc->primalHeuristicUb
-				<< " | Requisições aceitas: " << gc->primalHeuristicAccepted << endl;
-			cout << "Tempo Relaxação Raiz: " << gc->tempoTotal << endl;
-
-
 			if(gc->relaxationComplete && !config.rootOnly && saida == 1 &&
 				gc->lb < bestUB){
 				for(int i=0; i<=1; i++){
@@ -183,40 +206,8 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 				}
 			}
 
-			//ofs << fixed << setprecision(4);
-			ofs << left << setw(nameWidth) << setfill(separator) << gc->id;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->lb;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->ub;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->primalHeuristicUb;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->primalHeuristicAccepted;
-		    cout << "Best UB\t" << bestUB << endl;
-		    ofs << left << setw(nameWidth) << setfill(separator) << bestUB;
-		    ofs << left << setw(nameWidth) << setfill(separator) << worstLB;
-		    ofs << left << setw(nameWidth) << setfill(separator) << 100*(1 - worstLB/bestUB);
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCols;
-			ofs << left << setw(nameWidth) << setfill(separator) << gc->gCols;
-			ofs << left << setw(nameWidth) << setfill(separator) << gc->duplicateColumns;
-			ofs << left << setw(nameWidth) << setfill(separator) << gc->cgIterations;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCpuCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nBandwidthCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nAcceptanceCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nNoGoodCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCpuCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gBandwidthCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gAcceptanceCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gNoGoodCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nFeasibilityChecks;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nFeasibilityUnknown;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoRelaxacao;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoMaster;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoSub;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoCuts;
-		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoHeuristica;
-			ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoTotal;
-			ofs << left << setw(28) << setfill(separator) << gc->cgStopReason;
-			ofs << endl;
+			writeTreeRow(ofs, *gc, bestUB, worstLB);
+			writeTreeRow(cout, *gc, bestUB, worstLB);
 
 			if (!gc->relaxationComplete) {
 				terminationReason = gc->cgStopReason;
@@ -279,8 +270,6 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location,
 	ofs << "branching=most_fractional" << endl;
 	ofs << "END_SUMMARY" << endl;
 	ofs << "FINISHED!" << endl;
-
-	cout << "Best Solution: " << bestUB << endl;
 
 	ofs.close();
 	delete [] redeAceita;
