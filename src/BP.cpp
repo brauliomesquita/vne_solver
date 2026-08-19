@@ -3,7 +3,7 @@
 #include "Heuristica.h"
 
 
-void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, const char * outputfile){
+void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, bool useCuts, const char * outputfile){
 
 	std::vector<GC*> arvore;
 	GC * raiz = new GC();
@@ -46,7 +46,9 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	std::ofstream ofs;
 	ofs.open (outputfile, std::ofstream::out);// | std::ofstream::app);
 
-	ofs << "Output for Branch-and-Price Algorithm  " << endl;
+	ofs << "Output for "
+		<< (useCuts ? "Branch-Cut-and-Price" : "Branch-and-Price")
+		<< " Algorithm" << endl;
  	ofs << "Substrate Size:       " << substrate->getN() << endl;
  	ofs << "Number os VNs:        " << requests.size() << endl;
  	ofs << "Parameters: " << endl;
@@ -72,9 +74,12 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
     ofs << left << setw(nameWidth) << setfill(separator) << "GAP (%)";
     ofs << left << setw(nameWidth) << setfill(separator) << "# Cols";
     ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Cols";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Cuts";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Cuts";
     ofs << left << setw(nameWidth) << setfill(separator) << "Relax Time";
     ofs << left << setw(nameWidth) << setfill(separator) << "MasterTime";
     ofs << left << setw(nameWidth) << setfill(separator) << "SubTime";
+    ofs << left << setw(nameWidth) << setfill(separator) << "CutTime";
     ofs << left << setw(nameWidth) << setfill(separator) << "Total Time";
     ofs << endl;
 
@@ -100,7 +105,7 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		if(gc->parentLB < bestUB){
 
 			init = get_time();
-			gc->Solve(substrate, requests, location, delay, resilience, &y, &branch, &saida);
+			gc->Solve(substrate, requests, location, delay, resilience, useCuts, &y, &branch, &saida);
 			end = get_time();
 			tempoExecucao += gc->tempoTotal;
 
@@ -109,6 +114,7 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 			}
 
 			cout << "Número de colunas geradas: " << gc->pool.size() << endl;
+			cout << "Número de cover cuts: " << gc->nCuts << endl;
 
 			cout << "Custo da relaxação da raiz: " << gc->lb << endl;
 			cout << "Custo da Heuristica primal na raiz: " << gc->ub << endl;
@@ -142,9 +148,12 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		    ofs << left << setw(nameWidth) << setfill(separator) << 100*(1 - worstLB/bestUB);
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCols;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCols;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCuts;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoRelaxacao;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoMaster;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoSub;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoCuts;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoTotal;
 		    ofs << left << setw(nameWidth) << setfill(separator) << (end - init);
 		    ofs << endl;

@@ -10,7 +10,7 @@
 class BP {
 
 	public:
-		void Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, const char * outputfile);
+		void Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, bool useCuts, const char * outputfile);
 };
 
 #endif

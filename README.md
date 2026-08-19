@@ -43,10 +43,44 @@ Para executar o modelo ILP:
   1
 ```
 
-O primeiro argumento seleciona apenas o metodo de resolucao: `bp` para
-Branch-and-Price ou `ilp` para a formulacao inteira. Os demais argumentos sao o
-arquivo do substrato, a pasta das requisicoes, a quantidade de requisicoes e,
-no modo `bp`, o arquivo de saida opcional.
+Para executar Branch-Cut-and-Price com cover cuts de CPU:
+
+```powershell
+.\bin\x64\Release\vne_branch_price.exe `
+  bcp `
+  instances\sub-20.txt `
+  instances\r-250-0-50-20-10-5-25 `
+  1 `
+  saida-bcp.txt
+```
+
+O primeiro argumento seleciona o metodo de resolucao: `bp` para
+Branch-and-Price, `bcp` para Branch-Cut-and-Price com cover cuts de CPU ou `ilp`
+para a formulacao inteira. Os demais argumentos sao o arquivo do substrato, a
+pasta das requisicoes, a quantidade de requisicoes e, nos modos `bp` e `bcp`,
+o arquivo de saida opcional.
+
+## Cover cuts de CPU
+
+No modo `bcp`, depois de cada resolucao do mestre relaxado, o separador procura
+para cada no fisico um conjunto de nos virtuais cuja demanda total de CPU
+ultrapassa a capacidade. Para cada cover violado `C`, adiciona a desigualdade
+`sum(z[v,k,i] para (v,k) em C) <= |C| - 1` e resolve novamente o mestre antes
+de executar o pricing. Os cortes sao mantidos nos descendentes da arvore e o
+arquivo de saida informa quantos cortes foram herdados/gerados e o tempo gasto
+na separacao.
+
+O caso pequeno em `instances\cover-test` existe para validar a geracao efetiva
+dos cortes:
+
+```powershell
+.\bin\x64\Release\vne_branch_price.exe `
+  bcp `
+  instances\cover-test\substrate.txt `
+  instances\cover-test\requests `
+  2 `
+  saida-cover-test.txt
+```
 
 O perfil de depuracao da solucao ja esta configurado com esse teste de uma
 requisicao. A Community Edition do CPLEX limita o tamanho dos modelos; testes

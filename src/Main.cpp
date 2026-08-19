@@ -113,14 +113,14 @@ int main(int argc, char *argv[])
 {
 	if (argc < 5 || argc > 6) {
 		cerr << "Uso: " << argv[0]
-			 << " <bp|ilp> <substrato.txt> <pasta_requisicoes> <quantidade> [saida_bp.txt]" << endl;
+			 << " <bp|bcp|ilp> <substrato.txt> <pasta_requisicoes> <quantidade> [saida.txt]" << endl;
 		return EXIT_FAILURE;
 	}
 
 	const std::string method = argv[1];
-	if (method != "bp" && method != "ilp") {
+	if (method != "bp" && method != "bcp" && method != "ilp") {
 		cerr << "Metodo de resolucao invalido: '" << method
-			 << "'. Use 'bp' para Branch-and-Price ou 'ilp' para o modelo inteiro." << endl;
+			 << "'. Use 'bp', 'bcp' ou 'ilp'." << endl;
 		return EXIT_FAILURE;
 	}
 
@@ -144,10 +144,10 @@ int main(int argc, char *argv[])
 	for(int v=0; v<requests.size(); v++){
 		requests[v]->getGraph()->setDist(substrate);
 	}
-	if (method == "bp") {
+	if (method == "bp" || method == "bcp") {
 		BP bp;
 		bp.Solve(substrate, requests, false, false, false,
-			argc == 6 ? argv[5] : "saida.txt");
+			method == "bcp", argc == 6 ? argv[5] : "saida.txt");
 	} else {
 		ILPModel ilp;
 		const double objective = ilp.Solve(

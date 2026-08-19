@@ -1,5 +1,7 @@
 #include "GC.h"
 
+#include <algorithm>
+
 GC::GC(){
 	id = 1;
 	parentLB = 0.0;
@@ -8,11 +10,14 @@ GC::GC(){
 	sol_inteira = true;
 	nCols = 0;
 	gCols = 0;
+	nCuts = 0;
+	gCuts = 0;
 
 	pool = std::vector<Column>();
 	parentPool = std::vector<Column>();
 	forbidden = std::vector<Column>();
 	branchs = std::vector<Branch>();
+	cpuCoverCuts = std::vector<CpuCoverCut>();
 }
 
 GC::GC(GC * parent){
@@ -22,10 +27,13 @@ GC::GC(GC * parent){
 	sol_inteira = true;
 	nCols = 0;
 	gCols = 0;
+	nCuts = static_cast<unsigned int>(parent->cpuCoverCuts.size());
+	gCuts = 0;
 	this->pool = std::vector<Column>();
 	this->parentPool = std::vector<Column>(parent->pool);
 	this->branchs = std::vector<Branch>(parent->branchs);
 	this->forbidden = std::vector<Column>(parent->forbidden);
+	this->cpuCoverCuts = std::vector<CpuCoverCut>(parent->cpuCoverCuts);
 	this->parentLB = parent->lb;
 }
 
@@ -149,6 +157,7 @@ void GC::CreateObjectiveFunction() {
 }
 
 void GC::CreateConstraints() {
+	constraint_cpu_cover = OneDimRange(env);
 
 	for (int v = 0; v < requests.size(); v++) {
 		for (int k = 0; k < requests[v]->getGraph()->getN(); k++) {
@@ -200,6 +209,10 @@ void GC::CreateConstraints() {
 		}
 		if (flag)
 			model.add(expr4 - substrate->getNodes()[i].getCPU() <= 0);
+	}
+
+	for (const CpuCoverCut& cut : cpuCoverCuts) {
+		addCpuCoverCutToModel(cut);
 	}
 
 	char cName[256];
@@ -352,11 +365,127 @@ void GC::getDuals(IloNumArray2 * gamma, IloNumArray3 * alpha, IloNumArray3 * pi,
 }
 
 
+void GC::addCpuCoverCutToModel(const CpuCoverCut& cut) {
+	IloExpr expression(env);
+	for (const std::pair<int, int>& virtualNode : cut.virtualNodes) {
+		expression += z[virtualNode.first][virtualNode.second][cut.physicalNode];
+	}
+
+	IloRange range = expression <= static_cast<int>(cut.virtualNodes.size()) - 1;
+	constraint_cpu_cover.add(range);
+	model.add(range);
+	expression.end();
+}
+
+
+bool GC::hasCpuCoverCut(const CpuCoverCut& cut) const {
+	for (const CpuCoverCut& existing : cpuCoverCuts) {
+		if (existing.physicalNode == cut.physicalNode &&
+			existing.virtualNodes == cut.virtualNodes) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+unsigned int GC::separateCpuCoverCuts() {
+	struct Candidate {
+		int request;
+		int virtualNode;
+		double demand;
+		double value;
+	};
+
+	constexpr double tolerance = 1e-6;
+	std::vector<CpuCoverCut> pendingCuts;
+
+	for (int physicalNode = 0; physicalNode < substrate->getN(); ++physicalNode) {
+		std::vector<Candidate> candidates;
+		for (int v = 0; v < static_cast<int>(requests.size()); ++v) {
+			for (int k = 0; k < requests[v]->getGraph()->getN(); ++k) {
+				if (location && requests[v]->getGraph()->getDist(k, physicalNode) >
+					requests[v]->getMaxD()) {
+					continue;
+				}
+
+				const double value = master->getValue(z[v][k][physicalNode]);
+				if (value <= tolerance) {
+					continue;
+				}
+
+				candidates.push_back({v, k,
+					requests[v]->getGraph()->getNodes()[k].getCPU(), value});
+			}
+		}
+
+		std::sort(candidates.begin(), candidates.end(),
+			[](const Candidate& left, const Candidate& right) {
+				if (left.value != right.value) {
+					return left.value > right.value;
+				}
+				return left.demand > right.demand;
+			});
+
+		const double capacity = substrate->getNodes()[physicalNode].getCPU();
+		std::vector<Candidate> cover;
+		double coverDemand = 0.0;
+		for (const Candidate& candidate : candidates) {
+			cover.push_back(candidate);
+			coverDemand += candidate.demand;
+			if (coverDemand > capacity + tolerance) {
+				break;
+			}
+		}
+
+		if (coverDemand <= capacity + tolerance) {
+			continue;
+		}
+
+		bool reduced = true;
+		while (reduced && cover.size() > 1) {
+			reduced = false;
+			for (std::size_t index = 0; index < cover.size(); ++index) {
+				if (coverDemand - cover[index].demand > capacity + tolerance) {
+					coverDemand -= cover[index].demand;
+					cover.erase(cover.begin() + index);
+					reduced = true;
+					break;
+				}
+			}
+		}
+
+		double leftHandSide = 0.0;
+		CpuCoverCut cut;
+		cut.physicalNode = physicalNode;
+		for (const Candidate& candidate : cover) {
+			leftHandSide += candidate.value;
+			cut.virtualNodes.emplace_back(candidate.request, candidate.virtualNode);
+		}
+		std::sort(cut.virtualNodes.begin(), cut.virtualNodes.end());
+
+		const double rightHandSide = static_cast<double>(cut.virtualNodes.size()) - 1.0;
+		if (leftHandSide <= rightHandSide + tolerance || hasCpuCoverCut(cut)) {
+			continue;
+		}
+
+		pendingCuts.push_back(cut);
+	}
+
+	for (const CpuCoverCut& cut : pendingCuts) {
+		cpuCoverCuts.push_back(cut);
+		addCpuCoverCutToModel(cpuCoverCuts.back());
+	}
+
+	return static_cast<unsigned int>(pendingCuts.size());
+}
+
+
 double GC::getGAP(){
 	return 100*(1 - lb/ub);
 }
 
-void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, int *y_, Branch *branch, unsigned int *saida){
+void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, bool delay, bool resilience, bool useCuts, int *y_, Branch *branch, unsigned int *saida){
 
 	this->substrate = substrate;
 	this->requests = requests;
@@ -398,7 +527,9 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	SetCplexParameters();
 
 	Pricing * p = new Pricing();
-	tempoSub = tempoMaster = 0.0;
+	tempoSub = tempoMaster = tempoCuts = 0.0;
+	nCuts = static_cast<unsigned int>(cpuCoverCuts.size());
+	gCuts = 0;
 	double init, end;
 
 	if(this->id == 1){
@@ -458,6 +589,18 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		end =  get_time();
 		tempoMaster += end - init;
 
+		if (useCuts) {
+			init = get_time();
+			const unsigned int addedCuts = separateCpuCoverCuts();
+			end = get_time();
+			tempoCuts += end - init;
+			gCuts += addedCuts;
+			nCuts = static_cast<unsigned int>(cpuCoverCuts.size());
+			if (addedCuts > 0) {
+				continue;
+			}
+		}
+
 		//cout << " ~ " << master->getObjValue() << endl;
 
 		getDuals(&gamma, &alpha, &pi, &beta);
@@ -476,7 +619,7 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	}
 	gCols = nCols - gCols;
 
-	tempoRelaxacao = tempoMaster + tempoSub;
+	tempoRelaxacao = tempoMaster + tempoSub + tempoCuts;
 	tempoTotal = tempoRelaxacao;
 
 	this->lb = master->getObjValue();
