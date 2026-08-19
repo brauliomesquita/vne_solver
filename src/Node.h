@@ -9,10 +9,10 @@ class Node {
     public:
     Node(int id, double x, double y, double cpu);
     Node();
-    int getId();
-    double getX();
-    double getY();
-    double getCPU();
+    int getId() const;
+    double getX() const;
+    double getY() const;
+    double getCPU() const;
 
 };
 

@@ -1,4 +1,5 @@
 #include "GC.h"
+#include "FeasibilityOracle.h"
 
 #include <algorithm>
 
@@ -12,12 +13,24 @@ GC::GC(){
 	gCols = 0;
 	nCuts = 0;
 	gCuts = 0;
+	nCpuCuts = gCpuCuts = 0;
+	nBandwidthCuts = gBandwidthCuts = 0;
+	nAcceptanceCuts = gAcceptanceCuts = 0;
+	nNoGoodCuts = gNoGoodCuts = 0;
+	nFeasibilityChecks = nFeasibilityUnknown = 0;
+	nextColumnId = 0;
 
 	pool = std::vector<Column>();
 	parentPool = std::vector<Column>();
 	forbidden = std::vector<Column>();
 	branchs = std::vector<Branch>();
 	cpuCoverCuts = std::vector<CpuCoverCut>();
+	bandwidthCoverCuts = std::vector<BandwidthCoverCut>();
+	acceptanceResourceCoverCuts = std::vector<AcceptanceResourceCoverCut>();
+	acceptanceResourceProfiles = std::vector<AcceptanceResourceProfile>();
+	acceptanceNoGoodCuts = std::vector<AcceptanceNoGoodCut>();
+	feasibleAcceptanceSets = std::vector<std::vector<int>>();
+	inconclusiveAcceptanceSets = std::vector<std::vector<int>>();
 }
 
 GC::GC(GC * parent){
@@ -27,13 +40,32 @@ GC::GC(GC * parent){
 	sol_inteira = true;
 	nCols = 0;
 	gCols = 0;
-	nCuts = static_cast<unsigned int>(parent->cpuCoverCuts.size());
+	nCuts = static_cast<unsigned int>(parent->cpuCoverCuts.size() +
+		parent->bandwidthCoverCuts.size() + parent->acceptanceResourceCoverCuts.size() +
+		parent->acceptanceNoGoodCuts.size());
 	gCuts = 0;
+	nCpuCuts = static_cast<unsigned int>(parent->cpuCoverCuts.size());
+	nBandwidthCuts = static_cast<unsigned int>(parent->bandwidthCoverCuts.size());
+	nAcceptanceCuts = static_cast<unsigned int>(parent->acceptanceResourceCoverCuts.size());
+	nNoGoodCuts = static_cast<unsigned int>(parent->acceptanceNoGoodCuts.size());
+	gCpuCuts = gBandwidthCuts = gAcceptanceCuts = gNoGoodCuts = 0;
+	nFeasibilityChecks = nFeasibilityUnknown = 0;
+	nextColumnId = parent->nextColumnId;
 	this->pool = std::vector<Column>();
 	this->parentPool = std::vector<Column>(parent->pool);
 	this->branchs = std::vector<Branch>(parent->branchs);
 	this->forbidden = std::vector<Column>(parent->forbidden);
 	this->cpuCoverCuts = std::vector<CpuCoverCut>(parent->cpuCoverCuts);
+	this->bandwidthCoverCuts = std::vector<BandwidthCoverCut>(parent->bandwidthCoverCuts);
+	this->acceptanceResourceCoverCuts =
+		std::vector<AcceptanceResourceCoverCut>(parent->acceptanceResourceCoverCuts);
+	this->acceptanceResourceProfiles = std::vector<AcceptanceResourceProfile>();
+	this->acceptanceNoGoodCuts =
+		std::vector<AcceptanceNoGoodCut>(parent->acceptanceNoGoodCuts);
+	this->feasibleAcceptanceSets =
+		std::vector<std::vector<int>>(parent->feasibleAcceptanceSets);
+	this->inconclusiveAcceptanceSets =
+		std::vector<std::vector<int>>(parent->inconclusiveAcceptanceSets);
 	this->parentLB = parent->lb;
 }
 
@@ -158,6 +190,9 @@ void GC::CreateObjectiveFunction() {
 
 void GC::CreateConstraints() {
 	constraint_cpu_cover = OneDimRange(env);
+	constraint_bandwidth_cover = OneDimRange(env);
+	constraint_acceptance_resource_cover = OneDimRange(env);
+	constraint_acceptance_nogood = OneDimRange(env);
 
 	for (int v = 0; v < requests.size(); v++) {
 		for (int k = 0; k < requests[v]->getGraph()->getN(); k++) {
@@ -214,6 +249,12 @@ void GC::CreateConstraints() {
 	for (const CpuCoverCut& cut : cpuCoverCuts) {
 		addCpuCoverCutToModel(cut);
 	}
+	for (const AcceptanceResourceCoverCut& cut : acceptanceResourceCoverCuts) {
+		addAcceptanceResourceCoverCutToModel(cut);
+	}
+	for (const AcceptanceNoGoodCut& cut : acceptanceNoGoodCuts) {
+		addAcceptanceNoGoodCutToModel(cut);
+	}
 
 	char cName[256];
 
@@ -230,7 +271,7 @@ void GC::CreateConstraints() {
 	
 	// Bandwidth constraints
 	constraint_bw = OneDimRange(env, substrate->getM());
-	for (int i = 0; i < substrate->getM(); i++) {
+	for (int i = 0; i < substrate->getN(); i++) {
 		for (int j = i; j < substrate->getN(); j++) {
 			if(substrate->getAdj(i,j) != -1){
 				IloExpr expr_band(env);
@@ -284,6 +325,12 @@ void GC::addColumns(std::vector<Column> colunas){
 	for(int m=0; m < colunas.size(); m++){
 		if(colunas[m].lowerBound + colunas[m].upperBound == 0)
 			continue;
+
+		if (colunas[m].id < 0) {
+			colunas[m].id = nextColumnId++;
+		} else if (colunas[m].id >= nextColumnId) {
+			nextColumnId = colunas[m].id + 1;
+		}
 
 		int v = colunas[m].v;
 		int kl = colunas[m].kl;
@@ -389,7 +436,194 @@ bool GC::hasCpuCoverCut(const CpuCoverCut& cut) const {
 }
 
 
-unsigned int GC::separateCpuCoverCuts() {
+void GC::addBandwidthCoverCutToModel(const BandwidthCoverCut& cut) {
+	IloExpr expression(env);
+	for (long long columnId : cut.columnIds) {
+		for (int index = 0; index < static_cast<int>(pool.size()); ++index) {
+			if (pool[index].id == columnId) {
+				expression += lambda[index];
+				break;
+			}
+		}
+	}
+
+	IloRange range = expression <= static_cast<int>(cut.columnIds.size()) - 1;
+	constraint_bandwidth_cover.add(range);
+	model.add(range);
+	expression.end();
+}
+
+
+bool GC::hasBandwidthCoverCut(const BandwidthCoverCut& cut) const {
+	for (const BandwidthCoverCut& existing : bandwidthCoverCuts) {
+		if (existing.physicalEdge == cut.physicalEdge &&
+			existing.columnIds == cut.columnIds) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+void GC::addAcceptanceResourceCoverCutToModel(
+	const AcceptanceResourceCoverCut& cut) {
+	IloExpr expression(env);
+	for (int request : cut.requests) {
+		expression += y[request];
+	}
+
+	IloRange range = expression <= static_cast<int>(cut.requests.size()) - 1;
+	constraint_acceptance_resource_cover.add(range);
+	model.add(range);
+	expression.end();
+}
+
+
+bool GC::hasAcceptanceResourceCoverCut(
+	const AcceptanceResourceCoverCut& cut) const {
+	for (const AcceptanceResourceCoverCut& existing : acceptanceResourceCoverCuts) {
+		// The inequality is fully identified by its request set. Different resource
+		// profiles can prove the same cover, but it only needs to be added once.
+		if (existing.requests == cut.requests) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+void GC::addAcceptanceNoGoodCutToModel(const AcceptanceNoGoodCut& cut) {
+	IloExpr expression(env);
+	for (int request : cut.requests) {
+		expression += y[request];
+	}
+	IloRange range = expression <= static_cast<int>(cut.requests.size()) - 1;
+	constraint_acceptance_nogood.add(range);
+	model.add(range);
+	expression.end();
+}
+
+
+bool GC::hasAcceptanceNoGoodCut(const AcceptanceNoGoodCut& cut) const {
+	for (const AcceptanceNoGoodCut& existing : acceptanceNoGoodCuts) {
+		if (existing.requests == cut.requests) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+void GC::buildAcceptanceResourceProfiles() {
+	constexpr int totalCpu = 0;
+	constexpr int cpuThreshold = 1;
+	constexpr int totalBandwidth = 2;
+	constexpr int bandwidthThreshold = 3;
+	constexpr double tolerance = 1e-9;
+	constexpr std::size_t maxThresholds = 64;
+
+	acceptanceResourceProfiles.clear();
+
+	auto addProfileIfUseful = [this, tolerance](int resourceKind, double threshold,
+		const std::vector<double>& weights, double capacity) {
+		double totalWeight = 0.0;
+		for (double weight : weights) {
+			totalWeight += weight;
+		}
+		if (totalWeight > capacity + tolerance) {
+			acceptanceResourceProfiles.push_back(
+				{resourceKind, threshold, weights, capacity});
+		}
+	};
+
+	std::vector<double> cpuWeights(requests.size(), 0.0);
+	std::vector<double> bandwidthWeights(requests.size(), 0.0);
+	std::vector<double> cpuThresholds;
+	std::vector<double> bandwidthThresholds;
+	double totalCpuCapacity = 0.0;
+	double totalBandwidthCapacity = 0.0;
+
+	for (const Node& node : substrate->getNodes()) {
+		totalCpuCapacity += node.getCPU();
+	}
+	for (const Edge& edge : substrate->getEdges()) {
+		totalBandwidthCapacity += edge.getBW();
+	}
+
+	for (int v = 0; v < static_cast<int>(requests.size()); ++v) {
+		for (const Node& node : requests[v]->getGraph()->getNodes()) {
+			cpuWeights[v] += node.getCPU();
+			if (node.getCPU() > tolerance) {
+				cpuThresholds.push_back(node.getCPU());
+			}
+		}
+		for (const Edge& edge : requests[v]->getGraph()->getEdges()) {
+			bandwidthWeights[v] += edge.getBW();
+			if (edge.getBW() > tolerance) {
+				bandwidthThresholds.push_back(edge.getBW());
+			}
+		}
+	}
+
+	addProfileIfUseful(totalCpu, 0.0, cpuWeights, totalCpuCapacity);
+	addProfileIfUseful(totalBandwidth, 0.0, bandwidthWeights,
+		totalBandwidthCapacity);
+
+	auto prepareThresholds = [maxThresholds](std::vector<double> thresholds) {
+		std::sort(thresholds.begin(), thresholds.end());
+		thresholds.erase(std::unique(thresholds.begin(), thresholds.end()),
+			thresholds.end());
+		if (thresholds.size() <= maxThresholds) {
+			return thresholds;
+		}
+
+		std::vector<double> sampled;
+		sampled.reserve(maxThresholds);
+		for (std::size_t index = 0; index < maxThresholds; ++index) {
+			const std::size_t source = index * (thresholds.size() - 1) /
+				(maxThresholds - 1);
+			if (sampled.empty() || sampled.back() != thresholds[source]) {
+				sampled.push_back(thresholds[source]);
+			}
+		}
+		return sampled;
+	};
+
+	for (double threshold : prepareThresholds(cpuThresholds)) {
+		std::vector<double> weights(requests.size(), 0.0);
+		double capacity = 0.0;
+		for (const Node& node : substrate->getNodes()) {
+			capacity += std::floor(node.getCPU() / threshold + tolerance);
+		}
+		for (int v = 0; v < static_cast<int>(requests.size()); ++v) {
+			for (const Node& node : requests[v]->getGraph()->getNodes()) {
+				if (node.getCPU() + tolerance >= threshold) {
+					weights[v] += 1.0;
+				}
+			}
+		}
+		addProfileIfUseful(cpuThreshold, threshold, weights, capacity);
+	}
+
+	for (double threshold : prepareThresholds(bandwidthThresholds)) {
+		std::vector<double> weights(requests.size(), 0.0);
+		double capacity = 0.0;
+		for (const Edge& edge : substrate->getEdges()) {
+			capacity += std::floor(edge.getBW() / threshold + tolerance);
+		}
+		for (int v = 0; v < static_cast<int>(requests.size()); ++v) {
+			for (const Edge& edge : requests[v]->getGraph()->getEdges()) {
+				if (edge.getBW() + tolerance >= threshold) {
+					weights[v] += 1.0;
+				}
+			}
+		}
+		addProfileIfUseful(bandwidthThreshold, threshold, weights, capacity);
+	}
+}
+
+
+std::vector<CpuCoverCut> GC::findViolatedCpuCoverCuts() {
 	struct Candidate {
 		int request;
 		int virtualNode;
@@ -472,12 +706,356 @@ unsigned int GC::separateCpuCoverCuts() {
 		pendingCuts.push_back(cut);
 	}
 
-	for (const CpuCoverCut& cut : pendingCuts) {
+	return pendingCuts;
+}
+
+
+std::vector<BandwidthCoverCut> GC::findViolatedBandwidthCoverCuts() {
+	struct Candidate {
+		long long columnId;
+		double demand;
+		double value;
+	};
+
+	constexpr double tolerance = 1e-6;
+	std::vector<BandwidthCoverCut> pendingCuts;
+
+	for (int physicalEdge = 0; physicalEdge < substrate->getM(); ++physicalEdge) {
+		std::vector<Candidate> candidates;
+		for (int index = 0; index < static_cast<int>(pool.size()); ++index) {
+			const double value = master->getValue(lambda[index]);
+			if (value <= tolerance) {
+				continue;
+			}
+
+			bool usesEdge = false;
+			for (const Edge& edge : pool[index].getEdges()) {
+				if (edge.getId() == physicalEdge) {
+					usesEdge = true;
+					break;
+				}
+			}
+			if (!usesEdge) {
+				continue;
+			}
+
+			const int request = pool[index].v;
+			const int virtualEdge = pool[index].kl;
+			candidates.push_back({pool[index].id,
+				requests[request]->getGraph()->getEdges()[virtualEdge].getBW(), value});
+		}
+
+		std::sort(candidates.begin(), candidates.end(),
+			[](const Candidate& left, const Candidate& right) {
+				if (left.value != right.value) {
+					return left.value > right.value;
+				}
+				return left.demand > right.demand;
+			});
+
+		const double capacity = substrate->getEdges()[physicalEdge].getBW();
+		std::vector<Candidate> cover;
+		double coverDemand = 0.0;
+		for (const Candidate& candidate : candidates) {
+			cover.push_back(candidate);
+			coverDemand += candidate.demand;
+			if (coverDemand > capacity + tolerance) {
+				break;
+			}
+		}
+
+		if (coverDemand <= capacity + tolerance) {
+			continue;
+		}
+
+		bool reduced = true;
+		while (reduced && cover.size() > 1) {
+			reduced = false;
+			for (std::size_t index = 0; index < cover.size(); ++index) {
+				if (coverDemand - cover[index].demand > capacity + tolerance) {
+					coverDemand -= cover[index].demand;
+					cover.erase(cover.begin() + index);
+					reduced = true;
+					break;
+				}
+			}
+		}
+
+		double leftHandSide = 0.0;
+		BandwidthCoverCut cut;
+		cut.physicalEdge = physicalEdge;
+		for (const Candidate& candidate : cover) {
+			leftHandSide += candidate.value;
+			cut.columnIds.push_back(candidate.columnId);
+		}
+		std::sort(cut.columnIds.begin(), cut.columnIds.end());
+
+		const double rightHandSide = static_cast<double>(cut.columnIds.size()) - 1.0;
+		if (leftHandSide <= rightHandSide + tolerance || hasBandwidthCoverCut(cut)) {
+			continue;
+		}
+
+		pendingCuts.push_back(cut);
+	}
+
+	return pendingCuts;
+}
+
+
+std::vector<AcceptanceResourceCoverCut>
+GC::findViolatedAcceptanceResourceCoverCuts() {
+	struct Candidate {
+		int request;
+		double weight;
+		double value;
+	};
+
+	constexpr double tolerance = 1e-6;
+	std::vector<AcceptanceResourceCoverCut> pendingCuts;
+
+	for (const AcceptanceResourceProfile& profile : acceptanceResourceProfiles) {
+		std::vector<Candidate> candidates;
+		for (int v = 0; v < static_cast<int>(requests.size()); ++v) {
+			const double value = master->getValue(y[v]);
+			if (value > tolerance && profile.weights[v] > tolerance) {
+				candidates.push_back({v, profile.weights[v], value});
+			}
+		}
+
+		std::sort(candidates.begin(), candidates.end(),
+			[](const Candidate& left, const Candidate& right) {
+				if (left.value != right.value) {
+					return left.value > right.value;
+				}
+				return left.weight > right.weight;
+			});
+
+		std::vector<Candidate> cover;
+		double coverWeight = 0.0;
+		for (const Candidate& candidate : candidates) {
+			cover.push_back(candidate);
+			coverWeight += candidate.weight;
+			if (coverWeight > profile.capacity + tolerance) {
+				break;
+			}
+		}
+		if (coverWeight <= profile.capacity + tolerance) {
+			continue;
+		}
+
+		bool reduced = true;
+		while (reduced && cover.size() > 1) {
+			reduced = false;
+			for (std::size_t index = 0; index < cover.size(); ++index) {
+				if (coverWeight - cover[index].weight >
+					profile.capacity + tolerance) {
+					coverWeight -= cover[index].weight;
+					cover.erase(cover.begin() + index);
+					reduced = true;
+					break;
+				}
+			}
+		}
+
+		double leftHandSide = 0.0;
+		AcceptanceResourceCoverCut cut;
+		cut.resourceKind = profile.resourceKind;
+		cut.threshold = profile.threshold;
+		for (const Candidate& candidate : cover) {
+			leftHandSide += candidate.value;
+			cut.requests.push_back(candidate.request);
+		}
+		std::sort(cut.requests.begin(), cut.requests.end());
+
+		const double rightHandSide = static_cast<double>(cut.requests.size()) - 1.0;
+		if (leftHandSide <= rightHandSide + tolerance ||
+			hasAcceptanceResourceCoverCut(cut)) {
+			continue;
+		}
+
+		bool alreadyPending = false;
+		for (const AcceptanceResourceCoverCut& pending : pendingCuts) {
+			if (pending.requests == cut.requests) {
+				alreadyPending = true;
+				break;
+			}
+		}
+		if (!alreadyPending) {
+			pendingCuts.push_back(cut);
+		}
+	}
+
+	return pendingCuts;
+}
+
+
+std::vector<AcceptanceNoGoodCut> GC::findViolatedAcceptanceNoGoodCuts() {
+	constexpr double tolerance = 1e-6;
+	constexpr long long oracleVariableBudget = 850;
+	constexpr double oracleTimeLimitSeconds = 5.0;
+
+	struct Candidate {
+		int request;
+		double value;
+		long long variableEstimate;
+	};
+
+	std::vector<Candidate> candidates;
+	for (int v = 0; v < static_cast<int>(requests.size()); ++v) {
+		const double value = master->getValue(y[v]);
+		if (value <= tolerance) {
+			continue;
+		}
+		const long long estimate =
+			static_cast<long long>(requests[v]->getGraph()->getN()) * substrate->getN() +
+			static_cast<long long>(requests[v]->getGraph()->getM()) * substrate->getM();
+		candidates.push_back({v, value, estimate});
+	}
+
+	std::sort(candidates.begin(), candidates.end(),
+		[](const Candidate& left, const Candidate& right) {
+			return left.value > right.value;
+		});
+
+	std::vector<int> selected;
+	long long estimatedVariables = 0;
+	double totalDeficit = 0.0;
+	for (const Candidate& candidate : candidates) {
+		const double candidateDeficit = 1.0 - candidate.value;
+		if (estimatedVariables + candidate.variableEstimate > oracleVariableBudget) {
+			continue;
+		}
+		if (totalDeficit + candidateDeficit >= 1.0 - tolerance) {
+			break;
+		}
+		selected.push_back(candidate.request);
+		estimatedVariables += candidate.variableEstimate;
+		totalDeficit += candidateDeficit;
+	}
+
+	if (selected.empty()) {
+		return {};
+	}
+	std::sort(selected.begin(), selected.end());
+
+	auto containsSet = [](const std::vector<int>& superset,
+		const std::vector<int>& subset) {
+		return std::includes(superset.begin(), superset.end(),
+			subset.begin(), subset.end());
+	};
+
+	for (const std::vector<int>& feasible : feasibleAcceptanceSets) {
+		if (containsSet(feasible, selected)) {
+			return {};
+		}
+	}
+	for (const std::vector<int>& inconclusive : inconclusiveAcceptanceSets) {
+		if (inconclusive == selected) {
+			return {};
+		}
+	}
+
+	auto check = [this, oracleTimeLimitSeconds](const std::vector<int>& requestSet) {
+		++nFeasibilityChecks;
+		const FeasibilityStatus status = FeasibilityOracle::Check(substrate, requests,
+			requestSet, location, oracleTimeLimitSeconds);
+		if (status == FeasibilityStatus::Unknown) {
+			++nFeasibilityUnknown;
+		}
+		return status;
+	};
+
+	FeasibilityStatus status = check(selected);
+	if (status == FeasibilityStatus::Feasible) {
+		feasibleAcceptanceSets.push_back(selected);
+		return {};
+	}
+	if (status == FeasibilityStatus::Unknown) {
+		inconclusiveAcceptanceSets.push_back(selected);
+		return {};
+	}
+
+	// Remove requests while infeasibility remains, producing a smaller and
+	// stronger no-good cover. Unknown checks conservatively keep the request.
+	for (std::size_t index = 0; index < selected.size() && selected.size() > 1;) {
+		std::vector<int> trial = selected;
+		trial.erase(trial.begin() + index);
+
+		bool knownFeasible = false;
+		for (const std::vector<int>& feasible : feasibleAcceptanceSets) {
+			if (containsSet(feasible, trial)) {
+				knownFeasible = true;
+				break;
+			}
+		}
+		if (knownFeasible) {
+			++index;
+			continue;
+		}
+
+		status = check(trial);
+		if (status == FeasibilityStatus::Infeasible) {
+			selected.swap(trial);
+			continue;
+		}
+		if (status == FeasibilityStatus::Feasible) {
+			feasibleAcceptanceSets.push_back(trial);
+		} else {
+			inconclusiveAcceptanceSets.push_back(trial);
+		}
+		++index;
+	}
+
+	AcceptanceNoGoodCut cut;
+	cut.requests = selected;
+	if (hasAcceptanceNoGoodCut(cut)) {
+		return {};
+	}
+	return {cut};
+}
+
+
+unsigned int GC::separateCoverCuts() {
+	// Both families must inspect the same LP solution. Adding any range invalidates
+	// that solution in Concert, so model updates are deliberately deferred.
+	const std::vector<CpuCoverCut> newCpuCuts = findViolatedCpuCoverCuts();
+	const std::vector<BandwidthCoverCut> newBandwidthCuts =
+		findViolatedBandwidthCoverCuts();
+	const std::vector<AcceptanceResourceCoverCut> newAcceptanceCuts =
+		findViolatedAcceptanceResourceCoverCuts();
+	std::vector<AcceptanceNoGoodCut> newNoGoodCuts;
+	if (newCpuCuts.empty() && newBandwidthCuts.empty() && newAcceptanceCuts.empty()) {
+		newNoGoodCuts = findViolatedAcceptanceNoGoodCuts();
+	}
+
+	for (const CpuCoverCut& cut : newCpuCuts) {
 		cpuCoverCuts.push_back(cut);
 		addCpuCoverCutToModel(cpuCoverCuts.back());
 	}
+	for (const BandwidthCoverCut& cut : newBandwidthCuts) {
+		bandwidthCoverCuts.push_back(cut);
+		addBandwidthCoverCutToModel(bandwidthCoverCuts.back());
+	}
+	for (const AcceptanceResourceCoverCut& cut : newAcceptanceCuts) {
+		acceptanceResourceCoverCuts.push_back(cut);
+		addAcceptanceResourceCoverCutToModel(acceptanceResourceCoverCuts.back());
+	}
+	for (const AcceptanceNoGoodCut& cut : newNoGoodCuts) {
+		acceptanceNoGoodCuts.push_back(cut);
+		addAcceptanceNoGoodCutToModel(acceptanceNoGoodCuts.back());
+	}
 
-	return static_cast<unsigned int>(pendingCuts.size());
+	gCpuCuts += static_cast<unsigned int>(newCpuCuts.size());
+	gBandwidthCuts += static_cast<unsigned int>(newBandwidthCuts.size());
+	gAcceptanceCuts += static_cast<unsigned int>(newAcceptanceCuts.size());
+	gNoGoodCuts += static_cast<unsigned int>(newNoGoodCuts.size());
+	nCpuCuts = static_cast<unsigned int>(cpuCoverCuts.size());
+	nBandwidthCuts = static_cast<unsigned int>(bandwidthCoverCuts.size());
+	nAcceptanceCuts = static_cast<unsigned int>(acceptanceResourceCoverCuts.size());
+	nNoGoodCuts = static_cast<unsigned int>(acceptanceNoGoodCuts.size());
+	nCuts = nCpuCuts + nBandwidthCuts + nAcceptanceCuts + nNoGoodCuts;
+	return static_cast<unsigned int>(newCpuCuts.size() + newBandwidthCuts.size() +
+		newAcceptanceCuts.size() + newNoGoodCuts.size());
 }
 
 
@@ -491,6 +1069,7 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	this->requests = requests;
 
 	this->location = location;
+	buildAcceptanceResourceProfiles();
 
 	env = IloEnv();
 	model = IloModel(env);
@@ -528,8 +1107,14 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 
 	Pricing * p = new Pricing();
 	tempoSub = tempoMaster = tempoCuts = 0.0;
-	nCuts = static_cast<unsigned int>(cpuCoverCuts.size());
+	nCpuCuts = static_cast<unsigned int>(cpuCoverCuts.size());
+	nBandwidthCuts = static_cast<unsigned int>(bandwidthCoverCuts.size());
+	nAcceptanceCuts = static_cast<unsigned int>(acceptanceResourceCoverCuts.size());
+	nNoGoodCuts = static_cast<unsigned int>(acceptanceNoGoodCuts.size());
+	nCuts = nCpuCuts + nBandwidthCuts + nAcceptanceCuts + nNoGoodCuts;
 	gCuts = 0;
+	gCpuCuts = gBandwidthCuts = gAcceptanceCuts = gNoGoodCuts = 0;
+	nFeasibilityChecks = nFeasibilityUnknown = 0;
 	double init, end;
 
 	if(this->id == 1){
@@ -568,6 +1153,9 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 
 	std::vector<Column> colunas = std::vector<Column>();
 	addColumns(parentPool);
+	for (const BandwidthCoverCut& cut : bandwidthCoverCuts) {
+		addBandwidthCoverCutToModel(cut);
+	}
 	gCols = nCols;
 
 	for(int b=0; b<branchs.size(); b++){
@@ -591,11 +1179,13 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 
 		if (useCuts) {
 			init = get_time();
-			const unsigned int addedCuts = separateCpuCoverCuts();
+			const unsigned int addedCuts = separateCoverCuts();
 			end = get_time();
 			tempoCuts += end - init;
 			gCuts += addedCuts;
-			nCuts = static_cast<unsigned int>(cpuCoverCuts.size());
+			nCuts = static_cast<unsigned int>(cpuCoverCuts.size() +
+				bandwidthCoverCuts.size() + acceptanceResourceCoverCuts.size() +
+				acceptanceNoGoodCuts.size());
 			if (addedCuts > 0) {
 				continue;
 			}

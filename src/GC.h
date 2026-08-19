@@ -34,6 +34,28 @@ struct CpuCoverCut {
 	std::vector<std::pair<int, int>> virtualNodes;
 };
 
+struct BandwidthCoverCut {
+	int physicalEdge;
+	std::vector<long long> columnIds;
+};
+
+struct AcceptanceResourceCoverCut {
+	int resourceKind;
+	double threshold;
+	std::vector<int> requests;
+};
+
+struct AcceptanceResourceProfile {
+	int resourceKind;
+	double threshold;
+	std::vector<double> weights;
+	double capacity;
+};
+
+struct AcceptanceNoGoodCut {
+	std::vector<int> requests;
+};
+
 class GC {
 	IloEnv env;
 	IloModel model;
@@ -48,6 +70,9 @@ class GC {
 	/* Restrições */
 	OneDimRange constraint_bw;
 	OneDimRange constraint_cpu_cover;
+	OneDimRange constraint_bandwidth_cover;
+	OneDimRange constraint_acceptance_resource_cover;
+	OneDimRange constraint_acceptance_nogood;
 	TwoDimRange constraint_lambda;
 	ThreeDimRange constraint_saida;
 	ThreeDimRange constraint_entrada;
@@ -66,9 +91,20 @@ class GC {
 		void addColumns(std::vector<Column> colunas);
 		void getDuals(IloNumArray2 * gamma, IloNumArray3 * alpha, IloNumArray3 * pi, IloNumArray * beta);
 		void SetCplexParameters();
-		unsigned int separateCpuCoverCuts();
+		std::vector<CpuCoverCut> findViolatedCpuCoverCuts();
+		std::vector<BandwidthCoverCut> findViolatedBandwidthCoverCuts();
+		std::vector<AcceptanceResourceCoverCut> findViolatedAcceptanceResourceCoverCuts();
+		std::vector<AcceptanceNoGoodCut> findViolatedAcceptanceNoGoodCuts();
+		unsigned int separateCoverCuts();
+		void buildAcceptanceResourceProfiles();
 		void addCpuCoverCutToModel(const CpuCoverCut& cut);
+		void addBandwidthCoverCutToModel(const BandwidthCoverCut& cut);
+		void addAcceptanceResourceCoverCutToModel(const AcceptanceResourceCoverCut& cut);
+		void addAcceptanceNoGoodCutToModel(const AcceptanceNoGoodCut& cut);
 		bool hasCpuCoverCut(const CpuCoverCut& cut) const;
+		bool hasBandwidthCoverCut(const BandwidthCoverCut& cut) const;
+		bool hasAcceptanceResourceCoverCut(const AcceptanceResourceCoverCut& cut) const;
+		bool hasAcceptanceNoGoodCut(const AcceptanceNoGoodCut& cut) const;
 		double getGAP();
 
 		void addBranchLambda(int m, int valor);
@@ -81,11 +117,23 @@ class GC {
 		double parentLB;
 		unsigned int nCols, gCols;
 		unsigned int nCuts, gCuts;
+		unsigned int nCpuCuts, gCpuCuts;
+		unsigned int nBandwidthCuts, gBandwidthCuts;
+		unsigned int nAcceptanceCuts, gAcceptanceCuts;
+		unsigned int nNoGoodCuts, gNoGoodCuts;
+		unsigned int nFeasibilityChecks, nFeasibilityUnknown;
+		long long nextColumnId;
 		std::vector<Column> parentPool;
 		std::vector<Column> forbidden;
 		std::vector<Branch> branchs;
 		std::vector<Column> pool;
 		std::vector<CpuCoverCut> cpuCoverCuts;
+		std::vector<BandwidthCoverCut> bandwidthCoverCuts;
+		std::vector<AcceptanceResourceCoverCut> acceptanceResourceCoverCuts;
+		std::vector<AcceptanceResourceProfile> acceptanceResourceProfiles;
+		std::vector<AcceptanceNoGoodCut> acceptanceNoGoodCuts;
+		std::vector<std::vector<int>> feasibleAcceptanceSets;
+		std::vector<std::vector<int>> inconclusiveAcceptanceSets;
 
 		bool location;
 };

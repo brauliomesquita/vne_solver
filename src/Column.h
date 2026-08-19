@@ -8,6 +8,7 @@ class Column {
 	std::vector<Edge> edges;
 	
 	public:
+		long long id;
 		int v;
 		int kl;
 		int k, l;
@@ -23,4 +24,3 @@ class Column {
 };
 
 #endif /* GC_H */
-

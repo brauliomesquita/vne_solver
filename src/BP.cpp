@@ -76,6 +76,16 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
     ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Cols";
     ofs << left << setw(nameWidth) << setfill(separator) << "# Cuts";
     ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Cuts";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# CPU Cuts";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# BW Cuts";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Y Cuts";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# NG Cuts";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. CPU";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. BW";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. Y";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Gen. NG";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Feas. Checks";
+    ofs << left << setw(nameWidth) << setfill(separator) << "# Feas. Unk";
     ofs << left << setw(nameWidth) << setfill(separator) << "Relax Time";
     ofs << left << setw(nameWidth) << setfill(separator) << "MasterTime";
     ofs << left << setw(nameWidth) << setfill(separator) << "SubTime";
@@ -115,6 +125,10 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 
 			cout << "Número de colunas geradas: " << gc->pool.size() << endl;
 			cout << "Número de cover cuts: " << gc->nCuts << endl;
+			cout << "  CPU: " << gc->nCpuCuts
+				<< " | Banda: " << gc->nBandwidthCuts
+				<< " | Aceitação y: " << gc->nAcceptanceCuts
+				<< " | No-good: " << gc->nNoGoodCuts << endl;
 
 			cout << "Custo da relaxação da raiz: " << gc->lb << endl;
 			cout << "Custo da Heuristica primal na raiz: " << gc->ub << endl;
@@ -150,6 +164,16 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCols;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCuts;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nCpuCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nBandwidthCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nAcceptanceCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nNoGoodCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gCpuCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gBandwidthCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gAcceptanceCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->gNoGoodCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nFeasibilityChecks;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->nFeasibilityUnknown;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoRelaxacao;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoMaster;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoSub;

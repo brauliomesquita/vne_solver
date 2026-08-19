@@ -11,23 +11,22 @@ Edge::Edge (int id, int o, int d, double b, double del) {
 Edge::Edge (){
 }  
         
-int Edge::getId(){
+int Edge::getId() const {
     return this->id;
 }
 
- int Edge::getOrig(){
+ int Edge::getOrig() const {
     return this->orig;
 }
 
- int Edge::getDest(){
+ int Edge::getDest() const {
     return this->dest;
 }
 
- double Edge::getBW(){
+ double Edge::getBW() const {
     return this->bw;
 }
 
- double Edge::getDelay(){
+ double Edge::getDelay() const {
     return this->delay;
 }
-

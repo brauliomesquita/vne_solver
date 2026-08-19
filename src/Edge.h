@@ -9,11 +9,11 @@ class Edge {
 
   	Edge();
 	Edge (int id, int o, int d, double b, double del);
-     int getId();    
-     int getOrig();    
-     int getDest();    
-     double getBW();    
-     double getDelay();
+     int getId() const;
+     int getOrig() const;
+     int getDest() const;
+     double getBW() const;
+     double getDelay() const;
 };
 
 #endif

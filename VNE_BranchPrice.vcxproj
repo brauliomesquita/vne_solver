@@ -97,6 +97,7 @@
     <ClCompile Include="src\Column.cpp" />
     <ClCompile Include="src\Dijkstra.cpp" />
     <ClCompile Include="src\Edge.cpp" />
+    <ClCompile Include="src\FeasibilityOracle.cpp" />
     <ClCompile Include="src\GC.cpp" />
     <ClCompile Include="src\Graph.cpp" />
     <ClCompile Include="src\Heuristica.cpp" />
@@ -120,6 +121,7 @@
     <ClInclude Include="src\Graph.h" />
     <ClInclude Include="src\Heuristica.h" />
     <ClInclude Include="src\ILPModel.h" />
+    <ClInclude Include="src\FeasibilityOracle.h" />
     <ClInclude Include="src\MappingEdge.h" />
     <ClInclude Include="src\MappingLink.h" />
     <ClInclude Include="src\MappingNode.h" />

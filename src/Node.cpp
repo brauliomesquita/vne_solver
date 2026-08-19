@@ -10,18 +10,18 @@ Node::Node(int id, double x, double y, double cpu){
 Node::Node(){
 }
 
-int Node::getId(){
+int Node::getId() const {
     return this->id;
 }
 
-double Node::getX(){
+double Node::getX() const {
     return this->x;
 }
 
-double Node::getY(){
+double Node::getY() const {
     return this->y;
 }
 
-double Node::getCPU(){
+double Node::getCPU() const {
     return this->cpu;
 }

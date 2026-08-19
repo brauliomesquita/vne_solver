@@ -1,6 +1,7 @@
 #include "Column.h"
 
 Column::Column(int v, int kl){
+	id = -1;
 	this->v = v;
 	this->kl = kl;
 
