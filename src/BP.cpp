@@ -69,6 +69,8 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	ofs << left << setw(nameWidth) << setfill(separator) << "ID";
     ofs << left << setw(nameWidth) << setfill(separator) << "Node Obj";
     ofs << left << setw(nameWidth) << setfill(separator) << "Node Int";
+    ofs << left << setw(nameWidth) << setfill(separator) << "Heur. UB";
+    ofs << left << setw(nameWidth) << setfill(separator) << "Heur. Acc";
     ofs << left << setw(nameWidth) << setfill(separator) << "Best Integer";
     ofs << left << setw(nameWidth) << setfill(separator) << "Min LB";
     ofs << left << setw(nameWidth) << setfill(separator) << "GAP (%)";
@@ -90,6 +92,7 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
     ofs << left << setw(nameWidth) << setfill(separator) << "MasterTime";
     ofs << left << setw(nameWidth) << setfill(separator) << "SubTime";
     ofs << left << setw(nameWidth) << setfill(separator) << "CutTime";
+    ofs << left << setw(nameWidth) << setfill(separator) << "HeurTime";
     ofs << left << setw(nameWidth) << setfill(separator) << "Total Time";
     ofs << endl;
 
@@ -132,6 +135,9 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 
 			cout << "Custo da relaxação da raiz: " << gc->lb << endl;
 			cout << "Custo da Heuristica primal na raiz: " << gc->ub << endl;
+			cout << "Tempo da heurística primal: " << gc->tempoHeuristica << endl;
+			cout << "Incumbente da heurística: " << gc->primalHeuristicUb
+				<< " | Requisições aceitas: " << gc->primalHeuristicAccepted << endl;
 			cout << "Tempo Relaxação Raiz: " << gc->tempoTotal << endl;
 
 
@@ -156,6 +162,8 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 			ofs << left << setw(nameWidth) << setfill(separator) << gc->id;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->lb;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->ub;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->primalHeuristicUb;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->primalHeuristicAccepted;
 		    cout << "Best UB\t" << bestUB << endl;
 		    ofs << left << setw(nameWidth) << setfill(separator) << bestUB;
 		    ofs << left << setw(nameWidth) << setfill(separator) << worstLB;
@@ -178,6 +186,7 @@ void BP::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoMaster;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoSub;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoCuts;
+		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoHeuristica;
 		    ofs << left << setw(nameWidth) << setfill(separator) << gc->tempoTotal;
 		    ofs << left << setw(nameWidth) << setfill(separator) << (end - init);
 		    ofs << endl;

@@ -14,8 +14,32 @@ FeasibilityStatus FeasibilityOracle::Check(
 	const std::vector<int>& selectedRequests,
 	bool location,
 	double timeLimitSeconds) {
+	const std::vector<Branch> noBranchs;
+	return FindEmbedding(substrate, requests, selectedRequests, location,
+		noBranchs, timeLimitSeconds, nullptr, nullptr);
+}
+
+FeasibilityStatus FeasibilityOracle::FindEmbedding(
+	Graph* substrate,
+	const std::vector<Request*>& requests,
+	const std::vector<int>& selectedRequests,
+	bool location,
+	const std::vector<Branch>& branchs,
+	double timeLimitSeconds,
+	std::vector<Column>* embeddingColumns,
+	double* embeddingCost) {
+
+	if (embeddingColumns != nullptr) {
+		embeddingColumns->clear();
+	}
+	if (embeddingCost != nullptr) {
+		*embeddingCost = IloInfinity;
+	}
 
 	if (selectedRequests.empty()) {
+		if (embeddingCost != nullptr) {
+			*embeddingCost = 0.0;
+		}
 		return FeasibilityStatus::Feasible;
 	}
 
@@ -58,13 +82,42 @@ FeasibilityStatus FeasibilityOracle::Check(
 			}
 		}
 
+		for (const Branch& branch : branchs) {
+			int selected = -1;
+			for (int index = 0; index < selectedCount; ++index) {
+				if (selectedRequests[index] == branch.v) {
+					selected = index;
+					break;
+				}
+			}
+			if (selected < 0) {
+				continue;
+			}
+
+			if (branch.tipo_branch == 1) {
+				const int virtualNode = branch.x;
+				const int physicalNode = branch.y;
+				Graph* virtualGraph = requests[branch.v]->getGraph();
+				if (!location || virtualGraph->getDist(virtualNode, physicalNode) <=
+					requests[branch.v]->getMaxD()) {
+					placement[selected][virtualNode][physicalNode].setBounds(
+						branch.valor, branch.valor);
+				}
+			} else if (branch.tipo_branch == 2) {
+				route[selected][branch.x][branch.y].setBounds(branch.valor, branch.valor);
+			}
+		}
+
 		IloExpr routeCount(env);
 		for (int selected = 0; selected < selectedCount; ++selected) {
 			const int requestIndex = selectedRequests[selected];
 			for (int virtualEdge = 0;
 				virtualEdge < requests[requestIndex]->getGraph()->getM(); ++virtualEdge) {
 				for (int physicalEdge = 0; physicalEdge < physicalEdges; ++physicalEdge) {
-					routeCount += route[selected][virtualEdge][physicalEdge];
+					const double routeCost = substrate->getCost(physicalEdge) *
+						requests[requestIndex]->getGraph()->getEdges()[virtualEdge].getBW();
+					routeCount += (1.0 + 1e-9 * routeCost) *
+						route[selected][virtualEdge][physicalEdge];
 				}
 			}
 		}
@@ -285,6 +338,50 @@ FeasibilityStatus FeasibilityOracle::Check(
 			}
 
 			if (!addedConnectivityCut) {
+				if (embeddingColumns != nullptr || embeddingCost != nullptr) {
+					double totalCost = 0.0;
+					for (int selected = 0; selected < selectedCount; ++selected) {
+						const int requestIndex = selectedRequests[selected];
+						Graph* virtualGraph = requests[requestIndex]->getGraph();
+						for (int virtualEdge = 0;
+							virtualEdge < virtualGraph->getM(); ++virtualEdge) {
+							Column column(requestIndex, virtualEdge);
+							const int originVirtual =
+								virtualGraph->getEdges()[virtualEdge].getOrig();
+							const int destinationVirtual =
+								virtualGraph->getEdges()[virtualEdge].getDest();
+							for (int physicalNode = 0;
+								physicalNode < physicalNodes; ++physicalNode) {
+								if ((!location || virtualGraph->getDist(originVirtual, physicalNode) <=
+									requests[requestIndex]->getMaxD()) &&
+									cplex.getValue(placement[selected][originVirtual][physicalNode]) > 0.5) {
+									column.k = physicalNode;
+								}
+								if ((!location || virtualGraph->getDist(destinationVirtual, physicalNode) <=
+									requests[requestIndex]->getMaxD()) &&
+									cplex.getValue(placement[selected][destinationVirtual][physicalNode]) > 0.5) {
+									column.l = physicalNode;
+								}
+							}
+
+							for (int physicalEdge = 0;
+								physicalEdge < physicalEdges; ++physicalEdge) {
+								if (cplex.getValue(route[selected][virtualEdge][physicalEdge]) > 0.5) {
+									column.addEdge(substrate->getEdges()[physicalEdge]);
+									column.custoFO += substrate->getCost(physicalEdge) *
+										virtualGraph->getEdges()[virtualEdge].getBW();
+								}
+							}
+							totalCost += column.custoFO;
+							if (embeddingColumns != nullptr) {
+								embeddingColumns->push_back(column);
+							}
+						}
+					}
+					if (embeddingCost != nullptr) {
+						*embeddingCost = totalCost;
+					}
+				}
 				result = FeasibilityStatus::Feasible;
 				break;
 			}

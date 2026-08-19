@@ -8,6 +8,8 @@ GC::GC(){
 	parentLB = 0.0;
 	lb = 0.0;
 	ub = VNE_INFINITY;
+	primalHeuristicUb = VNE_INFINITY;
+	primalHeuristicAccepted = 0;
 	sol_inteira = true;
 	nCols = 0;
 	gCols = 0;
@@ -37,6 +39,8 @@ GC::GC(GC * parent){
 	id = 0;
 	lb = parent->lb;
 	ub = VNE_INFINITY;
+	primalHeuristicUb = VNE_INFINITY;
+	primalHeuristicAccepted = 0;
 	sol_inteira = true;
 	nCols = 0;
 	gCols = 0;
@@ -1059,6 +1063,121 @@ unsigned int GC::separateCoverCuts() {
 }
 
 
+double GC::runPrimalHeuristic(std::vector<Column>* solution) {
+	constexpr long long oracleVariableBudget = 850;
+	constexpr double totalTimeLimit = 2.0;
+	constexpr double minimumRemainingTime = 0.05;
+
+	if (solution != nullptr) {
+		solution->clear();
+	}
+
+	// A forced physical edge can require a route-specific construction. The
+	// compact heuristic currently supports forbidden edges, but conservatively
+	// skips nodes with a positive edge-use branch.
+	for (const Branch& decision : branchs) {
+		if (decision.tipo_branch == 2 && decision.valor == 1) {
+			return VNE_INFINITY;
+		}
+	}
+
+	std::vector<int> acceptance(requests.size(), -1);
+	for (const Branch& decision : branchs) {
+		if (decision.tipo_branch == 3) {
+			acceptance[decision.v] = decision.valor;
+		}
+	}
+
+	struct Candidate {
+		int request;
+		double lpValue;
+		long long variableEstimate;
+		bool mandatory;
+	};
+
+	std::vector<Candidate> candidates;
+	for (int v = 0; v < static_cast<int>(requests.size()); ++v) {
+		if (acceptance[v] == 0) {
+			continue;
+		}
+		const long long estimate =
+			static_cast<long long>(requests[v]->getGraph()->getN()) * substrate->getN() +
+			static_cast<long long>(requests[v]->getGraph()->getM()) * substrate->getM();
+		candidates.push_back({v, master->getValue(y[v]), estimate,
+			acceptance[v] == 1});
+	}
+
+	std::sort(candidates.begin(), candidates.end(),
+		[](const Candidate& left, const Candidate& right) {
+			if (left.mandatory != right.mandatory) {
+				return left.mandatory;
+			}
+			return left.lpValue > right.lpValue;
+		});
+
+	std::vector<int> selected;
+	std::vector<int> optional;
+	long long estimatedVariables = 0;
+	for (const Candidate& candidate : candidates) {
+		if (estimatedVariables + candidate.variableEstimate > oracleVariableBudget) {
+			if (candidate.mandatory) {
+				return VNE_INFINITY;
+			}
+			continue;
+		}
+		selected.push_back(candidate.request);
+		estimatedVariables += candidate.variableEstimate;
+		if (!candidate.mandatory) {
+			optional.push_back(candidate.request);
+		}
+	}
+	std::sort(selected.begin(), selected.end());
+
+	const double start = get_time();
+	while (true) {
+		const double remaining = totalTimeLimit - (get_time() - start);
+		if (remaining < minimumRemainingTime) {
+			return VNE_INFINITY;
+		}
+
+		std::vector<Column> candidateSolution;
+		double embeddingCost = VNE_INFINITY;
+		const FeasibilityStatus status = FeasibilityOracle::FindEmbedding(
+			substrate, requests, selected, location, branchs, remaining,
+			&candidateSolution, &embeddingCost);
+
+		if (status == FeasibilityStatus::Feasible) {
+			if (solution != nullptr) {
+				*solution = candidateSolution;
+			}
+			primalHeuristicAccepted = static_cast<unsigned int>(selected.size());
+			primalHeuristicUb = embeddingCost + M *
+				(static_cast<double>(requests.size()) - selected.size());
+			return primalHeuristicUb;
+		}
+
+		if (optional.empty()) {
+			return VNE_INFINITY;
+		}
+
+		// Drop the optional request with the lowest LP acceptance value.
+		int requestToRemove = optional.front();
+		double lowestValue = master->getValue(y[requestToRemove]);
+		for (int request : optional) {
+			const double value = master->getValue(y[request]);
+			if (value < lowestValue) {
+				lowestValue = value;
+				requestToRemove = request;
+			}
+		}
+		optional.erase(std::remove(optional.begin(), optional.end(), requestToRemove),
+			optional.end());
+		selected.erase(std::remove(selected.begin(), selected.end(), requestToRemove),
+			selected.end());
+	}
+}
+
+
 double GC::getGAP(){
 	return 100*(1 - lb/ub);
 }
@@ -1106,7 +1225,7 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	SetCplexParameters();
 
 	Pricing * p = new Pricing();
-	tempoSub = tempoMaster = tempoCuts = 0.0;
+	tempoSub = tempoMaster = tempoCuts = tempoHeuristica = 0.0;
 	nCpuCuts = static_cast<unsigned int>(cpuCoverCuts.size());
 	nBandwidthCuts = static_cast<unsigned int>(bandwidthCoverCuts.size());
 	nAcceptanceCuts = static_cast<unsigned int>(acceptanceResourceCoverCuts.size());
@@ -1115,6 +1234,8 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 	gCuts = 0;
 	gCpuCuts = gBandwidthCuts = gAcceptanceCuts = gNoGoodCuts = 0;
 	nFeasibilityChecks = nFeasibilityUnknown = 0;
+	primalHeuristicUb = VNE_INFINITY;
+	primalHeuristicAccepted = 0;
 	double init, end;
 
 	if(this->id == 1){
@@ -1321,6 +1442,16 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 
 	}
 
+	double heuristicUb = VNE_INFINITY;
+	if (!sol_inteira) {
+		std::vector<Column> heuristicSolution;
+		init = get_time();
+		heuristicUb = runPrimalHeuristic(&heuristicSolution);
+		end = get_time();
+		tempoHeuristica += end - init;
+		tempoTotal += end - init;
+	}
+
 	if(sol_inteira){
 		this->ub = this->lb;
 	 } else {
@@ -1353,18 +1484,17 @@ void GC::Solve(Graph *substrate, std::vector<Request*> requests, bool location, 
 			//lambda[p_].setBounds(0, 0);
 		}
 
+		double restrictedMasterUb = VNE_INFINITY;
 	 	try{
 		init = get_time();
 		if(master->solve())
-			this->ub = master->getObjValue();
-		else
-			this->ub = VNE_INFINITY;
+			restrictedMasterUb = master->getObjValue();
 		end = get_time();
 		tempoTotal += end - init;
-		//cout << "Custo Inteiro: " << this->ub << endl;
 		} catch (IloException e){
 			cout << " O bizil foi aqui!" << endl;
 		}
+		this->ub = std::min(heuristicUb, restrictedMasterUb);
 	}
 
 	delete p;

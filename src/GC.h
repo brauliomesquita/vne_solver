@@ -105,12 +105,15 @@ class GC {
 		bool hasBandwidthCoverCut(const BandwidthCoverCut& cut) const;
 		bool hasAcceptanceResourceCoverCut(const AcceptanceResourceCoverCut& cut) const;
 		bool hasAcceptanceNoGoodCut(const AcceptanceNoGoodCut& cut) const;
+		double runPrimalHeuristic(std::vector<Column>* solution);
 		double getGAP();
 
 		void addBranchLambda(int m, int valor);
 		void addBranch(Branch branch, int valor);
 
-		double tempoMaster, tempoSub, tempoCuts, tempoTotal, tempoRelaxacao;
+		double tempoMaster, tempoSub, tempoCuts, tempoHeuristica, tempoTotal, tempoRelaxacao;
+		double primalHeuristicUb;
+		unsigned int primalHeuristicAccepted;
 		double lb, ub;
 		bool sol_inteira;
 		unsigned int id;

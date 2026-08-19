@@ -122,6 +122,26 @@ topologia fisica desconectada que torna a requisicao inviavel:
   saida-nogood-test.txt
 ```
 
+### Heuristica primal guiada pela relaxacao
+
+Ao terminar a geracao de colunas de cada no, o algoritmo usa os valores LP de
+`y` para ordenar as requisicoes e chama o modelo auxiliar para construir um
+embedding inteiro completo. Diferentemente do MIP restrito executado em
+seguida, essa heuristica pode produzir rotas que ainda nao pertencem ao pool de
+`lambda`.
+
+As decisoes anteriores de branching sobre `y` e `z`, assim como arestas
+proibidas, sao aplicadas no modelo auxiliar. Se o conjunto inicial nao puder
+ser construido no limite de tempo, a requisicao opcional com menor valor de
+`y` e removida e a tentativa e repetida. Nos com uma decisao que obriga o uso
+de uma aresta especifica sao ignorados conservadoramente pela heuristica atual.
+
+O melhor valor entre a heuristica e o MIP restrito atualiza o incumbente do no.
+O relatorio inclui `Heur. UB`, `Heur. Acc` e `HeurTime`. Na instancia de cinco
+requisicoes usada nos exemplos, a heuristica encontrou um embedding aceitando
+as cinco redes e reduziu o incumbente da raiz de aproximadamente `30107.7` para
+`1275.98`.
+
 O caso pequeno em `instances\cover-test` existe para validar a geracao efetiva
 dos cortes:
 
